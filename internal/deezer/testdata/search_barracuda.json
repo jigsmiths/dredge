@@ -1,0 +1,65 @@
+{
+  "data": [
+    {
+      "id": 1080638,
+      "title": "Barracuda",
+      "duration": 264,
+      "isrc": "USSM10009075",
+      "artist": {
+        "name": "Heart"
+      },
+      "album": {
+        "title": "Little Queen"
+      }
+    },
+    {
+      "id": 764724202,
+      "title": "Barracuda (Cover)",
+      "duration": 213,
+      "isrc": "TCAEL1944947",
+      "artist": {
+        "name": "Seven Kingdoms"
+      },
+      "album": {
+        "title": "Empty Eyes"
+      }
+    },
+    {
+      "id": 857979,
+      "title": "Barracuda",
+      "duration": 208,
+      "isrc": "USSM17700674",
+      "artist": {
+        "name": "Heart"
+      },
+      "album": {
+        "title": "Rock: The Train Kept A Rollin'"
+      }
+    },
+    {
+      "id": 136804680,
+      "title": "Barracuda (Live)",
+      "duration": 325,
+      "isrc": "GBCBR1600287",
+      "artist": {
+        "name": "Heart"
+      },
+      "album": {
+        "title": "Live At The Royal Albert Hall"
+      }
+    },
+    {
+      "id": 1515656332,
+      "title": "Barracuda (Live)",
+      "duration": 281,
+      "isrc": "GX4R52194535",
+      "artist": {
+        "name": "Heart"
+      },
+      "album": {
+        "title": "Ship Of Dreams (Live '77)"
+      }
+    }
+  ],
+  "total": 85
+}
