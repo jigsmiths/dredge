@@ -35,6 +35,9 @@ const (
 // ErrNotStocked means the catalogue answered and does not have the recording.
 var ErrNotStocked = errors.New("monochrome: not stocked")
 
+// ErrLossyOnly means the catalogue serves the recording as AAC, not FLAC.
+var ErrLossyOnly = errors.New("monochrome: only available as lossy AAC")
+
 type Track struct {
 	ID         string
 	Title      string
@@ -396,6 +399,9 @@ func (c *Client) Download(ctx context.Context, t Track, w io.Writer) (int64, err
 
 	br := bufio.NewReader(body)
 	if magic, err := br.Peek(4); err != nil || !bytes.Equal(magic, []byte("fLaC")) {
+		if head, _ := br.Peek(8); len(head) == 8 && bytes.Equal(head[4:], []byte("ftyp")) {
+			return 0, ErrLossyOnly
+		}
 		return 0, causeOr(ctx, errors.New("monochrome: download is not a FLAC file"))
 	}
 	var src io.Reader = br

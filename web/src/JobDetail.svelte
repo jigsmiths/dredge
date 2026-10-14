@@ -58,6 +58,7 @@
     no_match: "no match",
     ambiguous: "ambiguous",
     not_stocked: "not on Monochrome",
+    lossy_only: "only lossy on Monochrome",
     failed: "failed",
   };
 </script>
@@ -86,7 +87,7 @@
 
   {@const now = by(job.tracks, "downloading")}
   {@const next = by(job.tracks, "pending")}
-  {@const bad = by(job.tracks, "failed", "not_stocked", "no_match", "ambiguous")}
+  {@const bad = by(job.tracks, "failed", "not_stocked", "lossy_only", "no_match", "ambiguous")}
   {@const ok = by(job.tracks, "done", "have", "duplicate")}
 
   {#if job.status === "resolving"}

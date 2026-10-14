@@ -63,10 +63,11 @@ func serve(ctx context.Context, e *env) error {
 	srv := &http.Server{
 		Addr: ":" + cfg.Port,
 		Handler: server.New(server.Options{
-			Jobs:   mgr,
-			Search: d.search,
-			APIKey: cfg.APIKey,
-			Scan:   func(ctx context.Context) (library.ScanStats, error) { return d.index.Scan(ctx, layout) },
+			Jobs:    mgr,
+			Search:  d.search,
+			APIKey:  cfg.APIKey,
+			Version: version,
+			Scan:    func(ctx context.Context) (library.ScanStats, error) { return d.index.Scan(ctx, layout) },
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       2 * time.Minute,

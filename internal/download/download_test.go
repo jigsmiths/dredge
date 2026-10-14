@@ -205,6 +205,16 @@ func TestMissingArtworkDoesNotFailTheDownload(t *testing.T) {
 	}
 }
 
+func TestALossyOnlyTrackIsNamedAndNotRetried(t *testing.T) {
+	opt, root := setup(t)
+	opt.Attempts, opt.Backoff = 3, func(int) time.Duration { return 0 }
+	src := &fakeSource{stocked: map[string]bool{"I": true}, body: func(io.Writer) error { return monochrome.ErrLossyOnly }}
+	res := Run(context.Background(), []resolve.Item{need("I", "Barracuda", "Heart")}, src, &fakeRecorder{}, opt)
+	if res[0].Outcome != LossyOnly || src.downloads != 1 || len(files(t, root)) != 0 {
+		t.Errorf("result = %+v, downloads = %d, files = %v", res[0], src.downloads, files(t, root))
+	}
+}
+
 func TestOnlyNeededItemsAreDownloaded(t *testing.T) {
 	opt, root := setup(t)
 	src := &fakeSource{stocked: map[string]bool{"I": true}}

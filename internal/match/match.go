@@ -60,22 +60,29 @@ func Pick(want track.Track, cands []Candidate) Result {
 	title := track.NormTitle(want.Title)
 	artists := track.NormArtists(want.Artists)
 
-	var ok []scored
-	for _, c := range cands {
-		if c.ISRC == "" || track.NormTitle(c.Title) != title || !sharesArtist(artists, c.Artists) {
-			continue
-		}
-		dist := 0
-		if want.DurationMS > 0 {
-			dist = DurationToleranceMS
-			if c.DurationMS > 0 {
-				dist = abs(c.DurationMS - want.DurationMS)
-			}
-			if dist > DurationToleranceMS {
+	collect := func(sameTitle func(string) bool) []scored {
+		var ok []scored
+		for _, c := range cands {
+			if c.ISRC == "" || !sameTitle(c.Title) || !sharesArtist(artists, c.Artists) {
 				continue
 			}
+			dist := 0
+			if want.DurationMS > 0 {
+				dist = DurationToleranceMS
+				if c.DurationMS > 0 {
+					dist = abs(c.DurationMS - want.DurationMS)
+				}
+				if dist > DurationToleranceMS {
+					continue
+				}
+			}
+			ok = append(ok, scored{c, dist})
 		}
-		ok = append(ok, scored{c, dist})
+		return ok
+	}
+	ok := collect(func(s string) bool { return track.NormTitle(s) == title })
+	if len(ok) == 0 { // a plain version tag, such as "- Radio Edit", is not a different recording
+		ok = collect(func(s string) bool { return track.NormTitle(plainTagRe.ReplaceAllString(s, " ")) == title })
 	}
 	if len(ok) == 0 {
 		return Result{Reason: "no candidate with the same title, artist and length"}
@@ -122,6 +129,9 @@ func Pick(want track.Track, cands []Candidate) Result {
 	}
 	return Result{Outcome: Ambiguous, Reason: fmt.Sprintf("%d different recordings fit equally well", len(rivals)+1)}
 }
+
+// Only tags that name the same recording; remixes, live and extended mixes are not here.
+var plainTagRe = regexp.MustCompile(`(?i)\s*(?:-\s*|\()(?:original mix|radio edit|bonus track)\)?\s*$`)
 
 var remasterRe = regexp.MustCompile(`(?i)\bremaster`)
 

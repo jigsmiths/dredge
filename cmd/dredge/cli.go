@@ -274,7 +274,7 @@ func (s *session) get(ctx context.Context, e *env) error {
 		text string
 	}{
 		{download.Downloaded, "downloaded"}, {download.Exists, "already existed"},
-		{download.NotStocked, "not on Monochrome"}, {download.Failed, "failed"},
+		{download.NotStocked, "not on Monochrome"}, {download.LossyOnly, "only lossy on Monochrome"}, {download.Failed, "failed"},
 	} {
 		if n := counts[c.o]; n > 0 || c.o == download.Downloaded && need > 0 {
 			parts = append(parts, fmt.Sprintf("%d %s", n, c.text))
@@ -310,6 +310,8 @@ func progress(e *env, s *session, r download.Result) {
 		what = "exists"
 	case download.NotStocked:
 		what = "not on Monochrome"
+	case download.LossyOnly:
+		what = "only lossy on Monochrome"
 	case download.Failed:
 		if stopped(r.Err) {
 			return // reported once as an interruption

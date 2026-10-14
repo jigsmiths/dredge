@@ -17,7 +17,7 @@ func New(opt Options) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.StripSlashes)
 
-	r.Get("/health", healthHandler)
+	r.Get("/health", healthHandler(opt.Version))
 
 	r.Route("/api", (&api{opt}).routes)
 
