@@ -10,7 +10,7 @@ type Config struct {
 func Load() *Config {
 	return &Config{
 		Port:   getEnv("PORT", "8080"),
-		DBPath: getEnv("DB_PATH", "/data/APP_NAME.db"),
+		DBPath: getEnv("DB_PATH", "/data/dredge.db"),
 	}
 }
 

@@ -11,7 +11,7 @@
 </script>
 
 <main>
-  <h1>APP_NAME</h1>
+  <h1>dredge</h1>
   {#if error}
     <p class="error">Backend unreachable: {error}</p>
   {:else if status}

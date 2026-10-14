@@ -4,7 +4,7 @@ ARG TARGETARCH
 
 RUN apk add --no-cache ca-certificates
 
-COPY ${TARGETOS}/${TARGETARCH}/APP_NAME /APP_NAME
+COPY ${TARGETOS}/${TARGETARCH}/dredge /dredge
 
 EXPOSE 8080
-ENTRYPOINT ["/APP_NAME"]
+ENTRYPOINT ["/dredge"]
