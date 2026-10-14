@@ -3,7 +3,9 @@ module github.com/jigsmiths/dredge
 go 1.27.2
 
 require (
+	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/go-chi/chi/v5 v5.3.1
+	golang.org/x/text v0.43.0
 	modernc.org/sqlite v1.54.0
 )
 

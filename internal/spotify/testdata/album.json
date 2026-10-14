@@ -1,0 +1,239 @@
+{
+  "data": {
+    "albumUnion": {
+      "__typename": "Album",
+      "name": "Little Queen",
+      "uri": "spotify:album:1LaeNhiUpL3X6N0LcFvuDF",
+      "type": "ALBUM",
+      "date": {
+        "isoString": "1977-05-14T00:00:00Z",
+        "precision": "DAY"
+      },
+      "artists": {
+        "items": [
+          {
+            "profile": {
+              "name": "Heart"
+            },
+            "uri": "spotify:artist:34jw2BbxjoYalTp8cJFCPv"
+          }
+        ]
+      },
+      "tracksV2": {
+        "totalCount": 10,
+        "items": [
+          {
+            "track": {
+              "uri": "spotify:track:4KfSdst7rW39C0sfhArdrz",
+              "name": "Barracuda",
+              "discNumber": 1,
+              "trackNumber": 1,
+              "duration": {
+                "totalMilliseconds": 261495
+              },
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Heart"
+                    },
+                    "uri": "spotify:artist:34jw2BbxjoYalTp8cJFCPv"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "track": {
+              "uri": "spotify:track:5tVYmyLGmwJAdyXOGAKdHI",
+              "name": "Love Alive",
+              "discNumber": 1,
+              "trackNumber": 2,
+              "duration": {
+                "totalMilliseconds": 261755
+              },
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Heart"
+                    },
+                    "uri": "spotify:artist:34jw2BbxjoYalTp8cJFCPv"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "track": {
+              "uri": "spotify:track:2OtaCdWNz55UWAHX0QQBHj",
+              "name": "Sylvan Song",
+              "discNumber": 1,
+              "trackNumber": 3,
+              "duration": {
+                "totalMilliseconds": 132052
+              },
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Heart"
+                    },
+                    "uri": "spotify:artist:34jw2BbxjoYalTp8cJFCPv"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "track": {
+              "uri": "spotify:track:0zSz0RvCWnYxOyh4JF2Az9",
+              "name": "Dream of the Archer",
+              "discNumber": 1,
+              "trackNumber": 4,
+              "duration": {
+                "totalMilliseconds": 270108
+              },
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Heart"
+                    },
+                    "uri": "spotify:artist:34jw2BbxjoYalTp8cJFCPv"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "track": {
+              "uri": "spotify:track:4QUjwfigQ1qSv0E1jN5yOr",
+              "name": "Kick It Out",
+              "discNumber": 1,
+              "trackNumber": 5,
+              "duration": {
+                "totalMilliseconds": 159117
+              },
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Heart"
+                    },
+                    "uri": "spotify:artist:34jw2BbxjoYalTp8cJFCPv"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "track": {
+              "uri": "spotify:track:0Mo316Vw5VAKEy2maTlTNS",
+              "name": "Little Queen",
+              "discNumber": 1,
+              "trackNumber": 6,
+              "duration": {
+                "totalMilliseconds": 311610
+              },
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Heart"
+                    },
+                    "uri": "spotify:artist:34jw2BbxjoYalTp8cJFCPv"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "track": {
+              "uri": "spotify:track:2cblNGpt4CnOCwng550MPy",
+              "name": "Treat Me Well",
+              "discNumber": 1,
+              "trackNumber": 7,
+              "duration": {
+                "totalMilliseconds": 205095
+              },
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Heart"
+                    },
+                    "uri": "spotify:artist:34jw2BbxjoYalTp8cJFCPv"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "track": {
+              "uri": "spotify:track:2jf9IJ3rkc2ZleUgzoWuJJ",
+              "name": "Say Hello",
+              "discNumber": 1,
+              "trackNumber": 8,
+              "duration": {
+                "totalMilliseconds": 216259
+              },
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Heart"
+                    },
+                    "uri": "spotify:artist:34jw2BbxjoYalTp8cJFCPv"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "track": {
+              "uri": "spotify:track:7mwWCHcFu5g6xdfvrAROP3",
+              "name": "Cry to Me",
+              "discNumber": 1,
+              "trackNumber": 9,
+              "duration": {
+                "totalMilliseconds": 169569
+              },
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Heart"
+                    },
+                    "uri": "spotify:artist:34jw2BbxjoYalTp8cJFCPv"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "track": {
+              "uri": "spotify:track:0LzrQBNXyuhNuOdbdtl6bc",
+              "name": "Go On Cry",
+              "discNumber": 1,
+              "trackNumber": 10,
+              "duration": {
+                "totalMilliseconds": 353385
+              },
+              "artists": {
+                "items": [
+                  {
+                    "profile": {
+                      "name": "Heart"
+                    },
+                    "uri": "spotify:artist:34jw2BbxjoYalTp8cJFCPv"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

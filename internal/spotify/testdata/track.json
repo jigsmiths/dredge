@@ -1,0 +1,43 @@
+{
+  "data": {
+    "trackUnion": {
+      "__typename": "Track",
+      "id": "7e4zDInS6tA2jwzphvs2Ay",
+      "uri": "spotify:track:7e4zDInS6tA2jwzphvs2Ay",
+      "name": "Jamaican (Bam Bam)",
+      "duration": {
+        "totalMilliseconds": 156393
+      },
+      "trackNumber": 1,
+      "albumOfTrack": {
+        "name": "Jamaican (Bam Bam)",
+        "uri": "spotify:album:5ZX3Zdp20YCGI4ruAfZlMj",
+        "date": {
+          "isoString": "2025-11-07T00:00:00Z",
+          "precision": "DAY",
+          "year": 2025
+        }
+      },
+      "firstArtist": {
+        "items": [
+          {
+            "profile": {
+              "name": "HUGEL"
+            },
+            "uri": "spotify:artist:5PlfkPxwCpRRWQJBxCa0By"
+          }
+        ]
+      },
+      "otherArtists": {
+        "items": [
+          {
+            "profile": {
+              "name": "SOLTO (FR)"
+            },
+            "uri": "spotify:artist:0F3tUZeb9dLNEpxCpzEBQt"
+          }
+        ]
+      }
+    }
+  }
+}

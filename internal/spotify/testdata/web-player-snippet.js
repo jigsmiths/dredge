@@ -1,0 +1,1 @@
+let a=new i.l("fetchPlaylist","query","8964e8eafb21aa992a7d951d256d83285c04be2105d209262901de70cb97584a",null),b=new i.l("getAlbum","query","11c9cad9cb24c4f9e25ef9456f68621cfd6006a90f679e729c1d2f2fd70dfe16",null),b=new i.l("getTrack","query","a8ef9e9f02b836feb0da3003c31dbb30decc6f4b473ef89ca88c882386d668de",null);

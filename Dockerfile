@@ -18,6 +18,9 @@ RUN apk add --no-cache ca-certificates
 
 COPY --from=go-builder /dredge /dredge
 
+ENV MUSIC_DIR=/music DB_PATH=/data/dredge.db
+
 VOLUME ["/data"]
 EXPOSE 8080
 ENTRYPOINT ["/dredge"]
+CMD ["serve"]
