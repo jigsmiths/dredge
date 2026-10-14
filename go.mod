@@ -4,6 +4,7 @@ go 1.27.2
 
 require (
 	github.com/go-chi/chi/v5 v5.3.1
+	golang.org/x/text v0.43.0
 	modernc.org/sqlite v1.54.0
 )
 
