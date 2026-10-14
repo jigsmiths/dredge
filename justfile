@@ -72,6 +72,10 @@ check:
     just lint
     just test
 
+# Smoke-test the real Spotify and Deezer (network)
+live:
+    DREDGE_LIVE=1 go test -count=1 -run Live -v ./internal/...
+
 # Point git at the repo hooks
 setup:
     git config core.hooksPath .githooks

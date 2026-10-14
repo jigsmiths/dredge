@@ -1,0 +1,148 @@
+{
+  "data": {
+    "playlistV2": {
+      "__typename": "Playlist",
+      "name": "Rock Classics",
+      "uri": "spotify:playlist:37i9dQZF1DWXRqgorJj26U",
+      "content": {
+        "__typename": "PlaylistItemsPage",
+        "totalCount": 200,
+        "pagingInfo": {
+          "limit": 3,
+          "offset": 100
+        },
+        "items": [
+          {
+            "itemV2": {
+              "__typename": "TrackResponseWrapper",
+              "data": {
+                "__typename": "Track",
+                "name": "Barracuda",
+                "uri": "spotify:track:4KfSdst7rW39C0sfhArdrz",
+                "discNumber": 1,
+                "trackNumber": 1,
+                "trackDuration": {
+                  "totalMilliseconds": 261495
+                },
+                "artists": {
+                  "items": [
+                    {
+                      "profile": {
+                        "name": "Heart"
+                      },
+                      "uri": "spotify:artist:34jw2BbxjoYalTp8cJFCPv"
+                    }
+                  ]
+                },
+                "albumOfTrack": {
+                  "name": "Little Queen",
+                  "uri": "spotify:album:1LaeNhiUpL3X6N0LcFvuDF",
+                  "date": {
+                    "isoString": "1977-05-14T00:00:00Z",
+                    "precision": "DAY"
+                  },
+                  "artists": {
+                    "items": [
+                      {
+                        "profile": {
+                          "name": "Heart"
+                        },
+                        "uri": "spotify:artist:34jw2BbxjoYalTp8cJFCPv"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "itemV2": {
+              "__typename": "TrackResponseWrapper",
+              "data": {
+                "__typename": "Track",
+                "name": "Uprising",
+                "uri": "spotify:track:4VqPOruhp5EdPBeR92t6lQ",
+                "discNumber": 1,
+                "trackNumber": 1,
+                "trackDuration": {
+                  "totalMilliseconds": 304840
+                },
+                "artists": {
+                  "items": [
+                    {
+                      "profile": {
+                        "name": "Muse"
+                      },
+                      "uri": "spotify:artist:12Chz98pHFMPJEknJQMWvI"
+                    }
+                  ]
+                },
+                "albumOfTrack": {
+                  "name": "The Resistance",
+                  "uri": "spotify:album:0eFHYz8NmK75zSplL5qlfM",
+                  "date": {
+                    "isoString": "2009-09-10T00:00:00Z",
+                    "precision": "DAY"
+                  },
+                  "artists": {
+                    "items": [
+                      {
+                        "profile": {
+                          "name": "Muse"
+                        },
+                        "uri": "spotify:artist:12Chz98pHFMPJEknJQMWvI"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "itemV2": {
+              "__typename": "TrackResponseWrapper",
+              "data": {
+                "__typename": "Track",
+                "name": "My Sharona",
+                "uri": "spotify:track:1HOMkjp0nHMaTnfAkslCQj",
+                "discNumber": 1,
+                "trackNumber": 7,
+                "trackDuration": {
+                  "totalMilliseconds": 295400
+                },
+                "artists": {
+                  "items": [
+                    {
+                      "profile": {
+                        "name": "The Knack"
+                      },
+                      "uri": "spotify:artist:0Nn9YwJzcaeuU1jJL06e3r"
+                    }
+                  ]
+                },
+                "albumOfTrack": {
+                  "name": "Get The Knack",
+                  "uri": "spotify:album:6H0wsYDvFlATzXHn0IqVpi",
+                  "date": {
+                    "isoString": "1979-01-01T00:00:00Z",
+                    "precision": "DAY"
+                  },
+                  "artists": {
+                    "items": [
+                      {
+                        "profile": {
+                          "name": "The Knack"
+                        },
+                        "uri": "spotify:artist:0Nn9YwJzcaeuU1jJL06e3r"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
