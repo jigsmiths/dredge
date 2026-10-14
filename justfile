@@ -22,7 +22,7 @@ web-build: web-install
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -d web ]; then
-        cd web && npm run build
+        cd web && npm run build && touch dist/.gitkeep
     fi
 
 # Run the frontend dev server (proxies /api and /health to :8080)
