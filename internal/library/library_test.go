@@ -14,8 +14,9 @@ import (
 	"github.com/jigsmiths/dredge/internal/track"
 )
 
-func TestPath(t *testing.T) {
-	root := filepath.FromSlash("/music")
+var layout = Layout{Root: filepath.FromSlash("/music"), SinglesDir: "Singles"}
+
+func TestAlbumPath(t *testing.T) {
 	tests := []struct {
 		name string
 		in   track.Track
@@ -38,7 +39,33 @@ func TestPath(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got, want := Path(root, tt.in), filepath.FromSlash(tt.want); got != want {
+			if got, want := layout.Path(Album, tt.in), filepath.FromSlash(tt.want); got != want {
+				t.Errorf("Path = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestSinglePathMatchesMusicGrabber(t *testing.T) {
+	tests := []struct {
+		name   string
+		layout Layout
+		in     track.Track
+		want   string
+	}{
+		{"artist and title", layout, track.Track{Title: "Barracuda", Artists: []string{"Heart"}, Album: "Little Queen", TrackNo: 1},
+			"/music/Singles/Heart/Barracuda.flac"},
+		{"only the first artist names the folder", layout, track.Track{Title: "Jamaican (Bam Bam)", Artists: []string{"HUGEL", "SOLTO (FR)"}},
+			"/music/Singles/HUGEL/Jamaican (Bam Bam).flac"},
+		{"no artist", layout, track.Track{Title: "Song"}, "/music/Singles/Unknown Artist/Song.flac"},
+		{"another singles folder", Layout{Root: layout.Root, SinglesDir: "Loose"}, track.Track{Title: "S", Artists: []string{"A"}},
+			"/music/Loose/A/S.flac"},
+		{"no singles folder puts artists at the root", Layout{Root: layout.Root}, track.Track{Title: "S", Artists: []string{"A"}},
+			"/music/A/S.flac"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, want := tt.layout.Path(Single, tt.in), filepath.FromSlash(tt.want); got != want {
 				t.Errorf("Path = %q, want %q", got, want)
 			}
 		})
@@ -46,21 +73,69 @@ func TestPath(t *testing.T) {
 }
 
 func TestPathNeverEscapesTheRoot(t *testing.T) {
-	root := filepath.FromSlash("/music")
 	for _, evil := range []string{"..", "../..", ".", "", "../../etc/passwd", "/etc", `..\..`} {
-		p := Path(root, track.Track{Title: evil, AlbumArtist: evil, Album: evil})
-		rel, err := filepath.Rel(root, p)
-		if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-			t.Errorf("title/artist/album %q gave %q, which leaves the root", evil, p)
+		for _, kind := range []Kind{Single, Album} {
+			p := layout.Path(kind, track.Track{Title: evil, Artists: []string{evil}, AlbumArtist: evil, Album: evil})
+			rel, err := filepath.Rel(layout.Root, p)
+			if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+				t.Errorf("%q gave %q, which leaves the root", evil, p)
+			}
 		}
+	}
+	l := Layout{Root: layout.Root, SinglesDir: "../../etc"}
+	if rel, _ := filepath.Rel(l.Root, l.Path(Single, track.Track{Title: "t", Artists: []string{"a"}})); strings.HasPrefix(rel, "..") {
+		t.Errorf("a singles dir of ../../etc escaped the root: %q", rel)
 	}
 }
 
 func TestPathTruncatesLongNames(t *testing.T) {
 	long := strings.Repeat("あ", 300)
-	p := Path("/music", track.Track{Title: long, AlbumArtist: "A", Album: "B"})
+	p := layout.Path(Album, track.Track{Title: long, AlbumArtist: "A", Album: "B"})
 	if n := len([]rune(strings.TrimSuffix(filepath.Base(p), ".flac"))); n > 100 {
 		t.Errorf("file name is %d characters, want at most 100", n)
+	}
+}
+
+func TestPlaylistPathMatchesMusicGrabber(t *testing.T) {
+	got := layout.PlaylistPath("Roadtrip", "37i9dQZF1EIfFW8AEFKKOD")
+	want := filepath.FromSlash("/music/Singles/Roadtrip (Spotify 37i9dQZF1EIfFW8AEFKKOD).m3u")
+	if got != want {
+		t.Errorf("PlaylistPath = %q, want %q", got, want)
+	}
+	if p := layout.PlaylistPath("A/B: C?", "id"); strings.Count(filepath.ToSlash(p), "/") != 3 {
+		t.Errorf("an unsafe playlist name made %q", p)
+	}
+}
+
+func TestWriteM3UUsesPathsRelativeToThePlaylist(t *testing.T) {
+	root := t.TempDir()
+	pl := filepath.Join(root, "Singles", "Mix (Spotify abc).m3u")
+	err := WriteM3U(pl, []string{
+		filepath.Join(root, "Singles", "Heart", "Barracuda.flac"),
+		filepath.Join(root, "Imagine Dragons", "Natural", "01 Natural.flac"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(pl)
+	want := "#EXTM3U\nHeart/Barracuda.flac\n../Imagine Dragons/Natural/01 Natural.flac\n"
+	if string(b) != want {
+		t.Errorf("playlist =\n%q\nwant\n%q", b, want)
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(pl)); len(entries) != 1 {
+		t.Errorf("%d files in the directory, want only the playlist", len(entries))
+	}
+}
+
+func TestWriteM3UReplacesAnEarlierVersion(t *testing.T) {
+	pl := filepath.Join(t.TempDir(), "a.m3u")
+	for _, tracks := range [][]string{{filepath.Join(filepath.Dir(pl), "one.flac")}, {filepath.Join(filepath.Dir(pl), "two.flac")}} {
+		if err := WriteM3U(pl, tracks); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if b, _ := os.ReadFile(pl); strings.Contains(string(b), "one.flac") || !strings.Contains(string(b), "two.flac") {
+		t.Errorf("playlist = %q", b)
 	}
 }
 
@@ -194,7 +269,7 @@ func TestScanIndexesFLACAndMP3(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, err := x.Scan(ctx, root)
+	st, err := x.Scan(ctx, Layout{Root: root, SinglesDir: "Singles"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,11 +304,11 @@ func TestScanIsIncremental(t *testing.T) {
 	b := filepath.Join(root, "b.flac")
 	writeFLAC(t, a, flacmeta.Tags{Title: "A", Artists: []string{"X"}, ISRC: "AAA"})
 	writeFLAC(t, b, flacmeta.Tags{Title: "B", Artists: []string{"X"}, ISRC: "BBB"})
-	if _, err := x.Scan(ctx, root); err != nil {
+	if _, err := x.Scan(ctx, Layout{Root: root, SinglesDir: "Singles"}); err != nil {
 		t.Fatal(err)
 	}
 
-	st, err := x.Scan(ctx, root)
+	st, err := x.Scan(ctx, Layout{Root: root, SinglesDir: "Singles"})
 	if err != nil || st.Unchanged != 2 || st.Indexed != 0 {
 		t.Fatalf("rescan = %+v, %v; want both files unchanged", st, err)
 	}
@@ -242,7 +317,7 @@ func TestScanIsIncremental(t *testing.T) {
 	if err := os.Remove(b); err != nil {
 		t.Fatal(err)
 	}
-	st, err = x.Scan(ctx, root)
+	st, err = x.Scan(ctx, Layout{Root: root, SinglesDir: "Singles"})
 	if err != nil || st.Indexed != 1 || st.Removed != 1 {
 		t.Fatalf("after edit and delete = %+v, %v", st, err)
 	}
@@ -262,10 +337,10 @@ func TestScanOnlyRemovesEntriesUnderItsRoot(t *testing.T) {
 	ctx := context.Background()
 	rootA, rootB := t.TempDir(), t.TempDir()
 	writeFLAC(t, filepath.Join(rootB, "b.flac"), flacmeta.Tags{Title: "B", Artists: []string{"X"}, ISRC: "BBB"})
-	if _, err := x.Scan(ctx, rootB); err != nil {
+	if _, err := x.Scan(ctx, Layout{Root: rootB, SinglesDir: "Singles"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := x.Scan(ctx, rootA); err != nil {
+	if _, err := x.Scan(ctx, Layout{Root: rootA, SinglesDir: "Singles"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, _ := x.ByISRC(ctx, "BBB"); !ok {
@@ -284,7 +359,7 @@ func TestScanSurvivesUnreadableFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFLAC(t, filepath.Join(root, "ok.flac"), flacmeta.Tags{Title: "Fine", Artists: []string{"X"}, ISRC: "OK"})
-	st, err := x.Scan(ctx, root)
+	st, err := x.Scan(ctx, Layout{Root: root, SinglesDir: "Singles"})
 	if err != nil || st.Unreadable != 2 || st.Indexed != 1 {
 		t.Fatalf("stats = %+v, %v; want 2 unreadable and 1 indexed", st, err)
 	}
@@ -299,14 +374,14 @@ func TestScanStopsWhenCancelled(t *testing.T) {
 	writeFLAC(t, filepath.Join(root, "a.flac"), flacmeta.Tags{Title: "A", Artists: []string{"X"}})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := x.Scan(ctx, root); err == nil {
+	if _, err := x.Scan(ctx, Layout{Root: root, SinglesDir: "Singles"}); err == nil {
 		t.Error("want the context error")
 	}
 }
 
 func TestScanOfAMissingRootIsAnError(t *testing.T) {
 	x := newIndex(t)
-	if _, err := x.Scan(context.Background(), filepath.Join(t.TempDir(), "nope")); err == nil {
+	if _, err := x.Scan(context.Background(), Layout{Root: filepath.Join(t.TempDir(), "nope"), SinglesDir: "Singles"}); err == nil {
 		t.Error("want an error for a root that does not exist")
 	}
 }
@@ -333,5 +408,68 @@ func TestLookupIgnoresFilesThatHaveSinceGone(t *testing.T) {
 	}
 	if _, ok, _ := x.ByMeta(ctx, "Song", []string{"A"}); ok {
 		t.Error("ByMeta found a file that was deleted")
+	}
+}
+
+func TestScanFallsBackToTheSinglesPathWhenTagsCannotBeRead(t *testing.T) {
+	x := newIndex(t)
+	ctx := context.Background()
+	root := t.TempDir()
+	for _, rel := range []string{
+		"Singles/Tracy Chapman/Fast Car.opus",
+		"Singles/AJAK, Emie/Sweet Song.m4a",
+		"Singles/Heart/Barracuda.mp3",
+	} {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("OggS no tags in here"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := x.Scan(ctx, Layout{Root: root, SinglesDir: "Singles"})
+	if err != nil || st.Indexed != 3 || st.Unreadable != 0 {
+		t.Fatalf("stats = %+v, %v; want all 3 indexed from their paths", st, err)
+	}
+	for _, c := range []struct{ title, artist string }{
+		{"Fast Car", "Tracy Chapman"}, {"Sweet Song", "AJAK"}, {"Sweet Song", "Emie"}, {"Barracuda", "Heart"},
+	} {
+		if _, ok, _ := x.ByMeta(ctx, c.title, []string{c.artist}); !ok {
+			t.Errorf("%q by %q not found from its path", c.title, c.artist)
+		}
+	}
+}
+
+func TestScanDoesNotGuessFromPathsOutsideTheSinglesFolder(t *testing.T) {
+	x := newIndex(t)
+	root := t.TempDir()
+	p := filepath.Join(root, "Imagine Dragons", "Natural", "01 Natural.opus")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("OggS"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := x.Scan(context.Background(), Layout{Root: root, SinglesDir: "Singles"})
+	if err != nil || st.Unreadable != 1 || st.Indexed != 0 {
+		t.Errorf("stats = %+v, %v; want the file reported unreadable", st, err)
+	}
+}
+
+func TestScanSkipsHiddenFoldersAndNonAudio(t *testing.T) {
+	x := newIndex(t)
+	root := t.TempDir()
+	writeFLAC(t, filepath.Join(root, ".hist", "x.flac"), flacmeta.Tags{Title: "Hidden", Artists: []string{"A"}})
+	for _, name := range []string{"All Songs.nsp", "Singles/Mix.m3u", "Singles/.dredge-1.part"} {
+		p := filepath.Join(root, filepath.FromSlash(name))
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := x.Scan(context.Background(), Layout{Root: root, SinglesDir: "Singles"})
+	if err != nil || st.Files != 0 {
+		t.Errorf("stats = %+v, %v; want nothing scanned", st, err)
 	}
 }

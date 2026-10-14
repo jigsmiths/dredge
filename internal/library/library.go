@@ -5,6 +5,7 @@ package library
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -22,9 +23,40 @@ const maxName = 100
 
 var unsafeRe = regexp.MustCompile(`[/\\:*?"<>|\x00-\x1f]`)
 
-// Path is where a downloaded track goes: Artist/Album/01 Title.flac, with the
-// disc number in front for discs after the first.
-func Path(root string, t track.Track) string {
+// Kind says how a download is filed.
+type Kind int
+
+const (
+	// Single is a track on its own or from a playlist: Singles/Artist/Title.flac,
+	// the layout MusicGrabber already uses.
+	Single Kind = iota
+	// Album is a whole release: Artist/Album/01 Title.flac, with the disc
+	// number in front for discs after the first.
+	Album
+)
+
+// Layout is where the library lives. SinglesDir is relative to Root; empty
+// files singles straight under Root.
+type Layout struct {
+	Root       string
+	SinglesDir string
+}
+
+func (l Layout) singles() string {
+	if l.SinglesDir == "" {
+		return l.Root
+	}
+	return filepath.Join(l.Root, safe(l.SinglesDir, "Singles"))
+}
+
+func (l Layout) Path(kind Kind, t track.Track) string {
+	if kind == Single {
+		artist := t.AlbumArtist
+		if len(t.Artists) > 0 {
+			artist = t.Artists[0]
+		}
+		return filepath.Join(l.singles(), safe(artist, "Unknown Artist"), safe(t.Title, "Unknown Title")+".flac")
+	}
 	artist := t.AlbumArtist
 	if strings.TrimSpace(artist) == "" && len(t.Artists) > 0 {
 		artist = t.Artists[0]
@@ -36,8 +68,53 @@ func Path(root string, t track.Track) string {
 	case t.TrackNo > 0:
 		name = fmt.Sprintf("%02d %s", t.TrackNo, name)
 	}
-	return filepath.Join(root,
+	return filepath.Join(l.Root,
 		safe(artist, "Unknown Artist"), safe(t.Album, "Unknown Album"), safe(name, "Unknown Title")+".flac")
+}
+
+// PlaylistPath names playlist files the way MusicGrabber does, so a playlist
+// it already wrote is the same file.
+func (l Layout) PlaylistPath(name, id string) string {
+	return filepath.Join(l.singles(), fmt.Sprintf("%s (Spotify %s).m3u", safe(name, "Playlist"), id))
+}
+
+// WriteM3U writes a playlist of absolute track paths as paths relative to the
+// playlist, which is how Navidrome reads them. It replaces any earlier file
+// atomically.
+func WriteM3U(path string, tracks []string) (err error) {
+	dir := filepath.Dir(path)
+	if err = os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	var b strings.Builder
+	b.WriteString("#EXTM3U\n")
+	for _, t := range tracks {
+		rel, rerr := filepath.Rel(dir, t)
+		if rerr != nil {
+			return rerr
+		}
+		b.WriteString(filepath.ToSlash(rel) + "\n")
+	}
+	tmp, err := os.CreateTemp(dir, ".dredge-*.part")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name())
+		}
+	}()
+	if _, err = tmp.WriteString(b.String()); err != nil {
+		return err
+	}
+	if err = tmp.Chmod(0o644); err != nil {
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // safe makes one path component that cannot climb out of its directory.
@@ -177,14 +254,39 @@ type ScanStats struct {
 	Unreadable int // tags could not be read
 }
 
-var audioExts = map[string]bool{".flac": true, ".mp3": true, ".m4a": true, ".ogg": true}
+var audioExts = map[string]bool{".flac": true, ".mp3": true, ".m4a": true, ".ogg": true, ".opus": true}
 
 type stamp struct{ mtime, size int64 }
 
-// Scan brings the index in line with the files under root. Files whose size
-// and modification time are unchanged are not read again.
-func (x *Index) Scan(ctx context.Context, root string) (ScanStats, error) {
+// fromPath names a file by where MusicGrabber puts it, Singles/Artist/Title.ext,
+// for formats whose tags cannot be read (Opus) or files without any.
+func (l Layout) fromPath(path string) (Entry, bool) {
+	rel, err := filepath.Rel(l.Root, path)
+	if err != nil {
+		return Entry{}, false
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if l.SinglesDir != "" {
+		if len(parts) < 1 || parts[0] != l.SinglesDir {
+			return Entry{}, false
+		}
+		parts = parts[1:]
+	}
+	if len(parts) != 2 {
+		return Entry{}, false
+	}
+	title := strings.TrimSuffix(parts[1], filepath.Ext(parts[1]))
+	if title == "" || parts[0] == "" {
+		return Entry{}, false
+	}
+	return Entry{Path: path, Title: title, Artists: []string{parts[0]}}, true
+}
+
+// Scan brings the index in line with the files under the library root. Files
+// whose size and modification time are unchanged are not read again.
+func (x *Index) Scan(ctx context.Context, l Layout) (ScanStats, error) {
 	var st ScanStats
+	root := l.Root
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
 		return st, fmt.Errorf("library: %q is not a directory", root)
 	}
@@ -217,7 +319,13 @@ func (x *Index) Scan(ctx context.Context, root string) (ScanStats, error) {
 		if err != nil {
 			return nil // an unreadable directory should not stop the scan
 		}
-		if d.IsDir() || !audioExts[strings.ToLower(filepath.Ext(path))] {
+		if d.IsDir() {
+			if path != root && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !audioExts[strings.ToLower(filepath.Ext(path))] {
 			return nil
 		}
 		info, err := d.Info()
@@ -232,6 +340,11 @@ func (x *Index) Scan(ctx context.Context, root string) (ScanStats, error) {
 			return nil
 		}
 		e, err := readEntry(path)
+		if err != nil || e.Title == "" {
+			if fe, ok := l.fromPath(path); ok {
+				e, err = fe, nil
+			}
+		}
 		if err != nil {
 			st.Unreadable++
 			return nil
@@ -259,6 +372,9 @@ func (x *Index) Scan(ctx context.Context, root string) (ScanStats, error) {
 }
 
 func readEntry(path string) (Entry, error) {
+	if strings.EqualFold(filepath.Ext(path), ".opus") {
+		return Entry{}, errors.New("library: Opus tags are not supported")
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return Entry{}, err
