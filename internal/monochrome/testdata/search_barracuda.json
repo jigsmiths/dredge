@@ -1,0 +1,60 @@
+{
+  "tracks": [
+    {
+      "id": "165966798886137856",
+      "trackId": "165966798886137856",
+      "title": "Barracuda",
+      "artistNames": [
+        "Heart"
+      ],
+      "releaseId": "165809194680307712",
+      "artwork": "https://tracks.monochrome.st/proxy/mi/165809194680307712-1A01.jpg",
+      "explicit": false,
+      "playable": true,
+      "duration": 261933,
+      "isrc": "USSM10009075"
+    },
+    {
+      "id": "166327284390838272",
+      "trackId": "166327284390838272",
+      "title": "Crazy On You",
+      "artistNames": [
+        "Heart"
+      ],
+      "releaseId": "165809215999979520",
+      "artwork": "https://tracks.monochrome.st/proxy/mi/165809215999979520-1A01.jpg",
+      "explicit": false,
+      "playable": true,
+      "duration": 293440,
+      "isrc": "USCA28600007"
+    },
+    {
+      "id": "166327278162296832",
+      "trackId": "166327278162296832",
+      "title": "Magic Man",
+      "artistNames": [
+        "Heart"
+      ],
+      "releaseId": "165809215999979520",
+      "artwork": "https://tracks.monochrome.st/proxy/mi/165809215999979520-1A01.jpg",
+      "explicit": false,
+      "playable": true,
+      "duration": 328360,
+      "isrc": "USCA28600005"
+    },
+    {
+      "id": "165966807245340672",
+      "trackId": "165966807245340672",
+      "title": "Straight On",
+      "artistNames": [
+        "Heart"
+      ],
+      "releaseId": "165809193422041088",
+      "artwork": "https://tracks.monochrome.st/proxy/mi/165809193422041088-1A01.jpg",
+      "explicit": false,
+      "playable": true,
+      "duration": 307973,
+      "isrc": "USSM19916396"
+    }
+  ]
+}

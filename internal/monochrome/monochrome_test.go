@@ -1,0 +1,328 @@
+package monochrome
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+func fixture(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile("testdata/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// fake serves Monochrome's web client and its tracks API.
+type fake struct {
+	t   *testing.T
+	srv *httptest.Server
+
+	mu        sync.Mutex
+	pageHits  int
+	searches  []string
+	statuses  []int // consumed one per search request, then 200
+	search    func(q string) string
+	track     func(w http.ResponseWriter, r *http.Request)
+	webBroken bool
+	apiPrefix string
+}
+
+func newFake(t *testing.T) *fake {
+	f := &fake{t: t, apiPrefix: "/api"}
+	f.search = func(q string) string { return fixture(t, "search_barracuda.json") }
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.pageHits++
+		broken := f.webBroken
+		f.mu.Unlock()
+		if broken {
+			http.Error(w, "down", http.StatusInternalServerError)
+			return
+		}
+		_, _ = fmt.Fprint(w, fixture(t, "page.html"))
+	})
+	mux.HandleFunc("/assets/index-BwwE3IeY.js", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, strings.ReplaceAll(fixture(t, "bundle.js"), "__API__", f.srv.URL+f.apiPrefix))
+	})
+	mux.HandleFunc("/old/", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `<html><head><meta http-equiv="refresh" content="0; url=%s/"></head></html>`, f.srv.URL)
+	})
+	mux.HandleFunc("/api/search/tracks", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.searches = append(f.searches, r.URL.Query().Get("q"))
+		status := 200
+		if len(f.statuses) > 0 {
+			status, f.statuses = f.statuses[0], f.statuses[1:]
+		}
+		f.mu.Unlock()
+		if status != 200 {
+			w.WriteHeader(status)
+			return
+		}
+		_, _ = fmt.Fprint(w, f.search(r.URL.Query().Get("q")))
+	})
+	mux.HandleFunc("/api/track/", func(w http.ResponseWriter, r *http.Request) {
+		if f.track != nil {
+			f.track(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	f.srv = httptest.NewServer(mux)
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+func (f *fake) client() *Client {
+	c := New(f.srv.URL, "", f.srv.Client())
+	c.sleep = func(context.Context, time.Duration) error { return nil }
+	return c
+}
+
+func TestFindDiscoversTheAPIAndMatchesByISRC(t *testing.T) {
+	f := newFake(t)
+	got, err := f.client().Find(context.Background(), "USSM10009075", "Heart", "Barracuda")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "165966798886137856" || got.Title != "Barracuda" || got.ISRC != "USSM10009075" ||
+		got.DurationMS != 261933 || got.ReleaseID != "165809194680307712" || got.Artists[0] != "Heart" {
+		t.Errorf("track = %+v", got)
+	}
+	if f.searches[0] != "Heart Barracuda" {
+		t.Errorf("first query = %q, want the artist and title", f.searches[0])
+	}
+}
+
+func TestFindIgnoresCaseAndSpaceInTheISRC(t *testing.T) {
+	f := newFake(t)
+	if _, err := f.client().Find(context.Background(), " ussm10009075 ", "Heart", "Barracuda"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFindNeedsTheExactISRC(t *testing.T) {
+	f := newFake(t)
+	_, err := f.client().Find(context.Background(), "USXX00000000", "Heart", "Barracuda")
+	if !errors.Is(err, ErrNotStocked) {
+		t.Fatalf("err = %v, want ErrNotStocked", err)
+	}
+}
+
+func TestFindFallsBackToTheTitleAlone(t *testing.T) {
+	f := newFake(t)
+	f.search = func(q string) string {
+		if q == "Barracuda" {
+			return fixture(t, "search_barracuda.json")
+		}
+		return `{"tracks":[]}`
+	}
+	if _, err := f.client().Find(context.Background(), "USSM10009075", "Heart", "Barracuda"); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(f.searches) != "[Heart Barracuda Barracuda]" {
+		t.Errorf("queries = %v", f.searches)
+	}
+}
+
+func TestFindSkipsUnplayableAndIdlessResults(t *testing.T) {
+	f := newFake(t)
+	f.search = func(string) string {
+		return `{"tracks":[
+			{"id":"1","trackId":"1","title":"Barracuda","artistNames":["Heart"],"isrc":"USSM10009075","playable":false,"duration":1},
+			{"id":"abc","title":"Barracuda","artistNames":["Heart"],"isrc":"USSM10009075","playable":true,"duration":1},
+			{"id":"3","trackId":"3","title":"Barracuda","artistNames":["Heart"],"isrc":"USSM10009075","playable":true,"duration":1}]}`
+	}
+	got, err := f.client().Find(context.Background(), "USSM10009075", "Heart", "Barracuda")
+	if err != nil || got.ID != "3" {
+		t.Fatalf("got %+v, %v; want track 3", got, err)
+	}
+}
+
+func TestGatewayErrorsAreRetried(t *testing.T) {
+	f := newFake(t)
+	f.statuses = []int{502, 503}
+	if _, err := f.client().Find(context.Background(), "USSM10009075", "Heart", "Barracuda"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPersistentGatewayErrorIsNotAMiss(t *testing.T) {
+	f := newFake(t)
+	f.statuses = []int{502, 502, 502, 502, 502, 502}
+	_, err := f.client().Find(context.Background(), "USSM10009075", "Heart", "Barracuda")
+	if err == nil || errors.Is(err, ErrNotStocked) {
+		t.Fatalf("err = %v, want a transport error that is not ErrNotStocked", err)
+	}
+}
+
+func TestAPIAddressIsDiscoveredOnceAndRefreshedAfterTheTTL(t *testing.T) {
+	f := newFake(t)
+	c := f.client()
+	now := time.Now()
+	c.now = func() time.Time { return now }
+	ctx := context.Background()
+
+	for range 2 {
+		if _, err := c.Find(ctx, "USSM10009075", "Heart", "Barracuda"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if f.pageHits != 1 {
+		t.Fatalf("web client fetched %d times, want 1", f.pageHits)
+	}
+	now = now.Add(discoveryTTL + time.Minute)
+	if _, err := c.Find(ctx, "USSM10009075", "Heart", "Barracuda"); err != nil {
+		t.Fatal(err)
+	}
+	if f.pageHits != 2 {
+		t.Errorf("web client fetched %d times after the TTL, want 2", f.pageHits)
+	}
+}
+
+func TestFailedRediscoveryKeepsTheLastKnownAddress(t *testing.T) {
+	f := newFake(t)
+	c := f.client()
+	now := time.Now()
+	c.now = func() time.Time { return now }
+	ctx := context.Background()
+	if _, err := c.Find(ctx, "USSM10009075", "Heart", "Barracuda"); err != nil {
+		t.Fatal(err)
+	}
+	f.webBroken = true
+	now = now.Add(discoveryTTL + time.Minute)
+	if _, err := c.Find(ctx, "USSM10009075", "Heart", "Barracuda"); err != nil {
+		t.Fatalf("a broken web client should not break searches: %v", err)
+	}
+}
+
+func TestDiscoveryFailureWithNothingKnownIsAnError(t *testing.T) {
+	f := newFake(t)
+	f.webBroken = true
+	if _, err := f.client().Find(context.Background(), "USSM10009075", "Heart", "Barracuda"); err == nil {
+		t.Fatal("want an error when the API address cannot be found")
+	}
+}
+
+func TestMetaRefreshToANewDomainIsFollowed(t *testing.T) {
+	f := newFake(t)
+	c := New(f.srv.URL+"/old/", "", f.srv.Client())
+	c.sleep = func(context.Context, time.Duration) error { return nil }
+	if _, err := c.Find(context.Background(), "USSM10009075", "Heart", "Barracuda"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAnExplicitAPIAddressSkipsDiscovery(t *testing.T) {
+	f := newFake(t)
+	f.webBroken = true
+	c := New(f.srv.URL, f.srv.URL+"/api/", f.srv.Client())
+	c.sleep = func(context.Context, time.Duration) error { return nil }
+	if _, err := c.Find(context.Background(), "USSM10009075", "Heart", "Barracuda"); err != nil {
+		t.Fatal(err)
+	}
+	if f.pageHits != 0 {
+		t.Errorf("web client fetched %d times, want 0", f.pageHits)
+	}
+}
+
+var flacBytes = append([]byte("fLaC"), bytes.Repeat([]byte{0x42}, 1000)...)
+
+func TestDownloadStreamsTheFLAC(t *testing.T) {
+	f := newFake(t)
+	f.track = func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/track/165966798886137856" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(flacBytes)
+	}
+	var buf bytes.Buffer
+	n, err := f.client().Download(context.Background(), Track{ID: "165966798886137856"}, &buf)
+	if err != nil || n != int64(len(flacBytes)) || !bytes.Equal(buf.Bytes(), flacBytes) {
+		t.Fatalf("n=%d err=%v equal=%v", n, err, bytes.Equal(buf.Bytes(), flacBytes))
+	}
+}
+
+func TestDownloadRejectsAnythingThatIsNotFLAC(t *testing.T) {
+	f := newFake(t)
+	f.track = func(w http.ResponseWriter, r *http.Request) { _, _ = fmt.Fprint(w, "<html>rate limited</html>") }
+	var buf bytes.Buffer
+	if _, err := f.client().Download(context.Background(), Track{ID: "1"}, &buf); err == nil {
+		t.Fatal("want an error for a body that is not FLAC")
+	}
+	if buf.Len() != 0 {
+		t.Errorf("wrote %d bytes of a rejected download", buf.Len())
+	}
+}
+
+func TestDownloadDetectsATruncatedBody(t *testing.T) {
+	f := newFake(t)
+	f.track = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprint(len(flacBytes)))
+		_, _ = w.Write(flacBytes[:500])
+	}
+	var buf bytes.Buffer
+	if _, err := f.client().Download(context.Background(), Track{ID: "1"}, &buf); err == nil {
+		t.Fatal("want an error when the body is shorter than Content-Length")
+	}
+}
+
+func TestDownloadNamesTheStatus(t *testing.T) {
+	f := newFake(t)
+	f.track = func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNotFound) }
+	_, err := f.client().Download(context.Background(), Track{ID: "1"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("err = %v, want one naming 404", err)
+	}
+}
+
+func TestDownloadGivesUpOnAStalledServer(t *testing.T) {
+	f := newFake(t)
+	release := make(chan struct{})
+	defer close(release)
+	f.track = func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fLaC"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}
+	c := f.client()
+	c.stall = 50 * time.Millisecond
+	_, err := c.Download(context.Background(), Track{ID: "1"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "stalled") {
+		t.Fatalf("err = %v, want one saying the download stalled", err)
+	}
+}
+
+func TestArtworkFetchesTheImage(t *testing.T) {
+	art := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("\xff\xd8\xffjpeg"))
+	}))
+	defer art.Close()
+	got, err := New("", "", art.Client()).Artwork(context.Background(), Track{ArtworkURL: art.URL + "/a.jpg"})
+	if err != nil || !bytes.HasPrefix(got, []byte("\xff\xd8\xff")) {
+		t.Fatalf("got %q, %v", got, err)
+	}
+}
+
+func TestArtworkWithoutAURLIsEmptyNotAnError(t *testing.T) {
+	got, err := New("", "", nil).Artwork(context.Background(), Track{})
+	if err != nil || got != nil {
+		t.Errorf("got %v, %v", got, err)
+	}
+}
