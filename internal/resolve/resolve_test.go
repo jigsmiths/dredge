@@ -75,7 +75,7 @@ func TestHaveByMetadataSkipsTheSearchEntirely(t *testing.T) {
 		t.Fatalf("got %+v", got[0])
 	}
 	if len(s.queries) != 0 {
-		t.Errorf("searched Deezer %d times for a track already in the library", len(s.queries))
+		t.Errorf("searched %d times for a track already in the library", len(s.queries))
 	}
 }
 
@@ -107,13 +107,13 @@ func TestNoMatchAndAmbiguousSayWhy(t *testing.T) {
 }
 
 func TestOneFailureDoesNotSpoilTheRest(t *testing.T) {
-	boom := errors.New("deezer down")
+	boom := errors.New("search down")
 	s := &fakeSearch{
 		results: map[string][]match.Candidate{"B two": {cand("ISRC2", "Two", "B", 1000)}},
 		errFor:  map[string]error{"A one": boom},
 	}
 	got := Resolve(context.Background(), []track.Track{tr("One", "A", 1000), tr("Two", "B", 1000)}, &fakeLib{}, s, 2)
-	if got[0].Status != Failed || !strings.Contains(got[0].Reason, "deezer down") {
+	if got[0].Status != Failed || !strings.Contains(got[0].Reason, "search down") {
 		t.Errorf("first = %+v", got[0])
 	}
 	if got[1].Status != Need {

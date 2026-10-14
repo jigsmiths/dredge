@@ -72,7 +72,7 @@ check:
     just lint
     just test
 
-# Smoke-test the real Spotify and Deezer (network)
+# Smoke-test the real Spotify and Monochrome (network)
 live:
     DREDGE_LIVE=1 go test -count=1 -run Live -v ./internal/...
 
