@@ -1,0 +1,15 @@
+{
+  "releaseId": "165809194680307712",
+  "title": "Little Queen",
+  "artists": [{"artistId": "152522706196107264", "name": "Heart"}],
+  "releaseType": "ALBUM",
+  "releaseDate": "1977-05-14T00:00:00.000Z",
+  "label": "Epic/Portrait",
+  "discCount": 2,
+  "trackCount": 3,
+  "tracks": [
+    {"trackId": "165966798886137856", "title": "Barracuda", "isrc": "USSM10009075", "playable": true, "discNumber": 1, "trackNumber": 1},
+    {"trackId": "165966798886137999", "title": "Kick It Out", "isrc": "USSM10009080", "playable": true, "discNumber": 1, "trackNumber": 3},
+    {"trackId": "165966798886138000", "title": "Bonus", "isrc": "USSM10009099", "playable": true, "discNumber": 2, "trackNumber": 2}
+  ]
+}

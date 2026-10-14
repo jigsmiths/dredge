@@ -34,6 +34,7 @@ type fake struct {
 	statuses  []int // consumed one per search request, then 200
 	search    func(q string) string
 	track     func(w http.ResponseWriter, r *http.Request)
+	release   func(w http.ResponseWriter, r *http.Request)
 	webBroken bool
 	apiPrefix string
 }
@@ -76,6 +77,13 @@ func newFake(t *testing.T) *fake {
 	mux.HandleFunc("/api/track/", func(w http.ResponseWriter, r *http.Request) {
 		if f.track != nil {
 			f.track(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	mux.HandleFunc("/api/releases/", func(w http.ResponseWriter, r *http.Request) {
+		if f.release != nil {
+			f.release(w, r)
 			return
 		}
 		http.NotFound(w, r)
