@@ -1,0 +1,78 @@
+version: 2
+
+project_name: APP_NAME
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - main: ./cmd/APP_NAME
+    binary: APP_NAME
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+
+homebrew_casks:
+  - repository:
+      owner: GITHUB_OWNER
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/GITHUB_OWNER/APP_NAME"
+    description: "APP_DESCRIPTION"
+    license: "MIT"
+
+# Docker — remove this section if not publishing a Docker image
+dockers_v2:
+  - id: dockerhub
+    images:
+      - "{{ .Env.DOCKERHUB_USERNAME }}/APP_NAME"
+    tags:
+      - "{{ .Version }}"
+      - latest
+    dockerfile: Dockerfile.goreleaser
+    platforms:
+      - linux/amd64
+      - linux/arm64
+
+  - id: ghcr
+    images:
+      - "ghcr.io/GITHUB_OWNER/APP_NAME"
+    tags:
+      - "{{ .Version }}"
+      - latest
+    dockerfile: Dockerfile.goreleaser
+    platforms:
+      - linux/amd64
+      - linux/arm64
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: GITHUB_OWNER
+    name: APP_NAME
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

@@ -1,0 +1,10 @@
+FROM alpine:latest
+ARG TARGETOS
+ARG TARGETARCH
+
+RUN apk add --no-cache ca-certificates
+
+COPY ${TARGETOS}/${TARGETARCH}/APP_NAME /APP_NAME
+
+EXPOSE 8080
+ENTRYPOINT ["/APP_NAME"]
