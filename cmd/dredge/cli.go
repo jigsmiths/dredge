@@ -21,6 +21,7 @@ type options struct {
 	cfg      config.Config
 	noScan   bool
 	attempts int
+	pick     int      // search: the result to download
 	args     []string // positional arguments
 }
 
@@ -35,6 +36,7 @@ func parseFlags(name string, e *env, args []string) (*options, error) {
 	fs.StringVar(&o.cfg.DBPath, "db", o.cfg.DBPath, "")
 	fs.BoolVar(&o.noScan, "no-scan", false, "")
 	fs.IntVar(&o.attempts, "attempts", 3, "")
+	fs.IntVar(&o.pick, "get", 0, "")
 	for {
 		if err := fs.Parse(args); err != nil {
 			return nil, usageError{fmt.Sprintf("%s: %v\n\n%s", name, err, usage)}

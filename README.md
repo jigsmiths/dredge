@@ -11,11 +11,13 @@ Download singles, albums and Spotify playlists as tagged FLAC into a music libra
 ```sh
 dredge resolve <spotify-link>   # list each track: have, need, no_match
 dredge get <spotify-link>       # download what is needed
+dredge search heart barracuda   # find a track by name, numbered
+dredge search heart barracuda --get 2   # download result 2
 dredge scan                     # index the library
 dredge serve                    # API and web page on :8080
 ```
 
-Links can be a playlist, an album or a track. `get` never overwrites a file and skips what the library already has, so rerunning it resumes. Ctrl-C stops cleanly and leaves no partial files.
+Links can be a playlist, an album or a track. To fetch one song by name, `search` lists the downloadable recordings and `--get N` downloads the one you pick; nothing is chosen for you. A picked track goes to `Singles/` like MusicGrabber's, and dredge reads its release from Monochrome to tag the album, album artist, date, disc and track number, so Navidrome groups it properly. If that lookup fails, the track is still downloaded with the basic tags. `get` never overwrites a file and skips what the library already has, so rerunning it resumes. Ctrl-C stops cleanly and leaves no partial files.
 
 Flags: `--music DIR`, `--singles-dir NAME`, `--workers N`, `--attempts N`, `--db PATH`, `--no-scan`.
 
@@ -42,11 +44,12 @@ Files are written 0644 in 0755 folders. Run as the user that owns the library (u
 
 ## Server and API
 
-`dredge serve` queues links and works through them in the background, one job at a time with `WORKERS` tracks in parallel. Progress is kept in the database, so a restart picks up where it stopped. The web page at `/` lists running jobs and history; click a job to see what is downloading, what is still to do and what passed.
+`dredge serve` queues links and works through them in the background, one job at a time with `WORKERS` tracks in parallel. Progress is kept in the database, so a restart picks up where it stopped. The web page at `/` takes a Spotify link or a song name (it lists results to pick from) and lists running jobs and history; click a job to see what is downloading, what is still to do and what passed.
 
 | | |
 |---|---|
-| `POST /api/jobs` | `{"url": "<spotify link>"}`; 202 and the job, or 200 and the existing job if that link is already queued or running; 400 for a bad link |
+| `GET /api/search?q=` | downloadable recordings for a query, one per ISRC: `isrc`, `title`, `artists`, `duration_ms` |
+| `POST /api/jobs` | `{"url": "<spotify link>"}` or a picked result `{"isrc", "title", "artists"}`; 202 and the job, or 200 and the existing job if that link is already queued or running; 400 for a bad link |
 | `GET /api/jobs` | newest first, with per-status counts; `?status=done` filters |
 | `GET /api/jobs/{id}` | the job and every track with its status |
 | `POST /api/jobs/{id}/retry` | run a finished job again; it skips what is now in the library |

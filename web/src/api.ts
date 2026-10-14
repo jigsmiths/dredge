@@ -26,6 +26,8 @@ export type Track = {
 
 export type JobDetail = Job & { tracks: Track[] };
 
+export type Hit = { isrc: string; title: string; artists: string[]; duration_ms: number };
+
 export class Unauthorized extends Error {}
 
 const keyName = "dredge-api-key";
@@ -56,6 +58,9 @@ export const api = {
   list: () => call<Job[]>("GET", "/jobs"),
   get: (id: number) => call<JobDetail>("GET", `/jobs/${id}`),
   submit: (url: string) => call<Job>("POST", "/jobs", { url }),
+  search: (q: string) => call<Hit[]>("GET", `/search?q=${encodeURIComponent(q)}`),
+  submitTrack: (h: Hit) =>
+    call<Job>("POST", "/jobs", { isrc: h.isrc, title: h.title, artists: h.artists }),
   retry: (id: number) => call<Job>("POST", `/jobs/${id}/retry`),
   cancel: (id: number) => call<Job>("POST", `/jobs/${id}/cancel`),
   remove: (id: number) => call<void>("DELETE", `/jobs/${id}`),
@@ -63,6 +68,13 @@ export const api = {
 
 export const active = (j: { status: string }) =>
   j.status === "queued" || j.status === "resolving" || j.status === "running";
+
+export const isLink = (s: string) => /^(https?:\/\/|spotify:)/i.test(s.trim());
+
+export function clock(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
 
 export function size(n = 0): string {
   if (n >= 1 << 20) return (n / (1 << 20)).toFixed(1) + " MB";

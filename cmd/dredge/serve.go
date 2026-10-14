@@ -27,7 +27,7 @@ func serve(ctx context.Context, e *env) error {
 
 	layout := library.Layout{Root: cfg.MusicDir, SinglesDir: cfg.SinglesDir}
 	mgr := jobs.NewManager(jobs.NewStore(d.conn), jobs.Deps{
-		Spotify: d.spotify, Search: d.search, Source: d.source, Library: d.index,
+		Spotify: d.spotify, Search: d.search, Source: d.source, Library: d.index, Details: d.details,
 		Layout: layout, Workers: cfg.Workers,
 	})
 	runCtx, stopJobs := context.WithCancel(ctx)
@@ -44,6 +44,7 @@ func serve(ctx context.Context, e *env) error {
 		Addr: ":" + cfg.Port,
 		Handler: server.New(server.Options{
 			Jobs:   mgr,
+			Search: d.search,
 			APIKey: cfg.APIKey,
 			Scan:   func(ctx context.Context) (library.ScanStats, error) { return d.index.Scan(ctx, layout) },
 		}),

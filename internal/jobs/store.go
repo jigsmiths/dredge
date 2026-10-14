@@ -97,8 +97,14 @@ func scanJob(r scanner) (Job, error) {
 	return j, nil
 }
 
+// Seed is what a job that has no Spotify page to fetch starts with.
+type Seed struct {
+	Kind, Name string
+	Tracks     []Track
+}
+
 // Create queues url, or returns the active job for it. created is false then.
-func (s *Store) Create(ctx context.Context, url string) (j Job, created bool, err error) {
+func (s *Store) Create(ctx context.Context, url string, seed *Seed) (j Job, created bool, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Job{}, false, err
@@ -112,12 +118,21 @@ func (s *Store) Create(ctx context.Context, url string) (j Job, created bool, er
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return Job{}, false, err
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO jobs (url, status, created_at) VALUES (?, ?, ?)`,
-		url, Queued, unix(time.Now()))
+	var kind, name string
+	if seed != nil {
+		kind, name = seed.Kind, seed.Name
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO jobs (url, kind, name, status, created_at) VALUES (?, ?, ?, ?, ?)`,
+		url, kind, name, Queued, unix(time.Now()))
 	if err != nil {
 		return Job{}, false, err
 	}
 	id, _ := res.LastInsertId()
+	if seed != nil {
+		if err := insertTracks(ctx, tx, id, seed.Tracks); err != nil {
+			return Job{}, false, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return Job{}, false, err
 	}
@@ -253,6 +268,13 @@ func (s *Store) ReplaceTracks(ctx context.Context, id int64, tracks []Track) err
 	if _, err := tx.ExecContext(ctx, `DELETE FROM job_tracks WHERE job_id = ?`, id); err != nil {
 		return err
 	}
+	if err := insertTracks(ctx, tx, id, tracks); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func insertTracks(ctx context.Context, tx *sql.Tx, id int64, tracks []Track) error {
 	for _, t := range tracks {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO job_tracks (job_id, pos, title, artists, album, isrc, status, path, bytes, reason)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -260,7 +282,7 @@ func (s *Store) ReplaceTracks(ctx context.Context, id int64, tracks []Track) err
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *Store) SetTrack(ctx context.Context, id int64, pos int, status, path string, bytes int64, reason string) error {

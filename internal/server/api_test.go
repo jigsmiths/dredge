@@ -28,7 +28,7 @@ func newServer(t *testing.T, key string) http.Handler {
 	t.Cleanup(func() { _ = conn.Close() })
 	m := jobs.NewManager(jobs.NewStore(conn), jobs.Deps{})
 	return New(Options{
-		Jobs: m, APIKey: key,
+		Jobs: m, APIKey: key, Search: fakeSearch{},
 		Scan: func(context.Context) (library.ScanStats, error) { return library.ScanStats{Files: 7, Indexed: 2}, nil },
 	})
 }
