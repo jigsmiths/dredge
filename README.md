@@ -2,9 +2,9 @@
 
 [![ci](https://github.com/jigsmiths/dredge/actions/workflows/ci.yml/badge.svg)](https://github.com/jigsmiths/dredge/actions/workflows/ci.yml)
 
-Download singles, albums and Spotify playlists as tagged FLAC into a music library, without a browser. A Go CLI; the HTTP server is a stub for now.
+Download singles, albums and Spotify playlists as tagged FLAC into a music library, without a browser. A Go CLI, plus a server with a job queue, an HTTP API and a small web page to watch downloads.
 
-**Status:** `resolve`, `get` and `scan` work. Spotify and Monochrome are unofficial APIs and can change without notice.
+**Status:** `resolve`, `get`, `scan` and `serve` work. Spotify and Monochrome are unofficial APIs and can change without notice.
 
 ## Usage
 
@@ -12,6 +12,7 @@ Download singles, albums and Spotify playlists as tagged FLAC into a music libra
 dredge resolve <spotify-link>   # list each track: have, need, no_match
 dredge get <spotify-link>       # download what is needed
 dredge scan                     # index the library
+dredge serve                    # API and web page on :8080
 ```
 
 Links can be a playlist, an album or a track. `get` never overwrites a file and skips what the library already has, so rerunning it resumes. Ctrl-C stops cleanly and leaves no partial files.
@@ -23,6 +24,8 @@ Flags: `--music DIR`, `--singles-dir NAME`, `--workers N`, `--attempts N`, `--db
 | `MUSIC_DIR` | `/music` | library root |
 | `DREDGE_SINGLES_DIR` | `Singles` | singles folder under the root; `-` for none |
 | `WORKERS` | `4` | parallel lookups and downloads |
+| `PORT` | `8080` | `serve` listen port |
+| `DREDGE_API_KEY` | unset | when set, `/api` needs it in an `X-Api-Key` header |
 | `DB_PATH` | per-user config dir | index database (the image sets `/data/dredge.db`) |
 
 ## The library
@@ -36,6 +39,25 @@ dredge fits a library that MusicGrabber, Lidarr and Navidrome already share.
 - A track counts as already there when an ISRC matches, or the title and an artist match. Live and remix versions count as different tracks.
 
 Files are written 0644 in 0755 folders. Run as the user that owns the library (uid 1000 on Altair). `get` refuses to run if the music dir does not exist, so an unmounted volume is never filled by accident.
+
+## Server and API
+
+`dredge serve` queues links and works through them in the background, one job at a time with `WORKERS` tracks in parallel. Progress is kept in the database, so a restart picks up where it stopped. The web page at `/` lists running jobs and history; click a job to see what is downloading, what is still to do and what passed.
+
+| | |
+|---|---|
+| `POST /api/jobs` | `{"url": "<spotify link>"}`; 202 and the job, or 200 and the existing job if that link is already queued or running; 400 for a bad link |
+| `GET /api/jobs` | newest first, with per-status counts; `?status=done` filters |
+| `GET /api/jobs/{id}` | the job and every track with its status |
+| `POST /api/jobs/{id}/retry` | run a finished job again; it skips what is now in the library |
+| `POST /api/jobs/{id}/cancel` | dequeue, or stop a running job and leave the rest undone |
+| `DELETE /api/jobs/{id}` | forget a finished job; files are never touched |
+| `POST /api/scan` | re-index the library |
+| `GET /health` | liveness |
+
+Job statuses are `queued`, `resolving`, `running`, `done`, `failed` (the link could not be fetched) and `cancelled`. Track statuses are `pending`, `downloading`, `done`, `have`, `duplicate`, `not_stocked`, `no_match`, `ambiguous` and `failed`. A `done` job can still hold tracks that were not fetched; the counts say how many.
+
+With `DREDGE_API_KEY` set, send `X-Api-Key` on `/api` calls; the web page asks for it once. `/health` and the page itself stay open. `serve` refuses to start if the music dir does not exist.
 
 ## How it works
 

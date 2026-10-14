@@ -11,7 +11,7 @@ import (
 	"github.com/jigsmiths/dredge/web"
 )
 
-func New() http.Handler {
+func New(opt Options) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -19,9 +19,7 @@ func New() http.Handler {
 
 	r.Get("/health", healthHandler)
 
-	// r.Route("/api", func(r chi.Router) {
-	// 	r.Get("/example", exampleHandler)
-	// })
+	r.Route("/api", (&api{opt}).routes)
 
 	r.Handle("/*", spaHandler())
 

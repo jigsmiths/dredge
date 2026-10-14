@@ -70,6 +70,7 @@ type Options struct {
 	Attempts int                       // tries per track; 3 if zero
 	Backoff  func(n int) time.Duration // wait before retry n; 3s times n if nil
 	Progress func(Result)              // called once per item, one at a time
+	Started  func(resolve.Item)        // called when a Need item begins, one at a time with Progress
 }
 
 func (o Options) attempts() int {
@@ -98,6 +99,11 @@ func Run(ctx context.Context, items []resolve.Item, src Source, rec Recorder, op
 		}
 	}
 	res := pool.Map(ctx, opt.Workers, items, func(ctx context.Context, it resolve.Item) (Result, error) {
+		if opt.Started != nil && it.Status == resolve.Need {
+			progress.Lock()
+			opt.Started(it)
+			progress.Unlock()
+		}
 		r := one(ctx, it, src, rec, opt, &place)
 		report(r)
 		return r, nil

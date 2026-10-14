@@ -14,6 +14,7 @@ type Config struct {
 	MusicDir   string // MUSIC_DIR, the library root
 	SinglesDir string // DREDGE_SINGLES_DIR, relative to MusicDir; "-" files singles straight under it
 	Workers    int    // WORKERS
+	APIKey     string // DREDGE_API_KEY; when set, /api needs it in X-Api-Key
 }
 
 func Load() *Config {
@@ -23,6 +24,7 @@ func Load() *Config {
 		MusicDir:   getEnv("MUSIC_DIR", "/music"),
 		SinglesDir: getEnv("DREDGE_SINGLES_DIR", "Singles"),
 		Workers:    defaultWorkers,
+		APIKey:     os.Getenv("DREDGE_API_KEY"),
 	}
 	if c.SinglesDir == "-" {
 		c.SinglesDir = ""

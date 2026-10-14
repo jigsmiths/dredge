@@ -10,7 +10,8 @@ import (
 )
 
 func Connect(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", path)
+	// Several goroutines write at once; wait for the lock rather than fail.
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}

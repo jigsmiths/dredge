@@ -340,34 +340,7 @@ func size(n int64) string {
 // writePlaylist writes an M3U of every track of the playlist that is in the
 // library, in playlist order, where Navidrome will pick it up.
 func (s *session) writePlaylist(e *env, results []download.Result) error {
-	byISRC := map[string]string{}
-	here := func(i int) string {
-		if i < len(results) {
-			switch results[i].Outcome {
-			case download.Downloaded, download.Exists:
-				return results[i].Path
-			}
-		}
-		if s.items[i].Status == resolve.Have {
-			return s.items[i].Path
-		}
-		return ""
-	}
-	for i, it := range s.items {
-		if p := here(i); p != "" && it.Track.ISRC != "" {
-			byISRC[it.Track.ISRC] = p
-		}
-	}
-	var paths []string
-	for i, it := range s.items {
-		p := here(i)
-		if p == "" && it.Status == resolve.Duplicate {
-			p = byISRC[it.Track.ISRC]
-		}
-		if p != "" {
-			paths = append(paths, p)
-		}
-	}
+	paths := download.Placed(s.items, results)
 	if len(paths) == 0 {
 		return nil
 	}
