@@ -56,7 +56,7 @@ type Item struct {
 	Reason string
 }
 
-const searchLimit = 10
+const searchLimit = 25
 
 // Resolve checks every track with at most workers running at once. A track
 // that cannot be checked is reported as Failed and does not affect the rest.
@@ -101,11 +101,18 @@ func resolveOne(ctx context.Context, t track.Track, lib Library, s Searcher) (It
 	if len(t.Artists) == 0 || strings.TrimSpace(t.Artists[0]) == "" {
 		return Item{Track: t, Status: NoMatch, Reason: "no artist to search with"}, nil
 	}
-	cands, err := s.Search(ctx, t.Artists[0]+" "+track.NormTitle(t.Title), searchLimit)
-	if err != nil {
-		return Item{}, fmt.Errorf("search: %w", err)
+	// the title alone is a second chance when the artist is spelled differently
+	title := track.NormTitle(t.Title)
+	var m match.Result
+	for _, q := range []string{t.Artists[0] + " " + title, title} {
+		cands, err := s.Search(ctx, q, searchLimit)
+		if err != nil {
+			return Item{}, fmt.Errorf("search: %w", err)
+		}
+		if m = match.Pick(t, cands); m.Outcome != match.NoMatch {
+			break
+		}
 	}
-	m := match.Pick(t, cands)
 	switch m.Outcome {
 	case match.NoMatch:
 		return Item{Track: t, Status: NoMatch, Reason: m.Reason}, nil

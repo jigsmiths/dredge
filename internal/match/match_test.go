@@ -93,13 +93,54 @@ func TestPick(t *testing.T) {
 			wantISRC: "BBBB00000002",
 		},
 		{
-			name: "same duration, different ISRCs, no album help",
+			name: "releases of the same recording: the first of equals is taken",
 			want: barracuda,
 			cands: []Candidate{
 				cand("AAAA00000001", "Barracuda", "Heart", "Greatest Hits", 262000),
 				cand("BBBB00000002", "Barracuda", "Heart", "Classics", 262000),
 			},
-			outcome: Ambiguous,
+			outcome:  Matched,
+			wantISRC: "AAAA00000001",
+		},
+		{
+			name: "the closer of two near-equal releases wins even inside the margin",
+			want: barracuda,
+			cands: []Candidate{
+				cand("AAAA00000001", "Barracuda", "Heart", "Greatest Hits", 262400),
+				cand("BBBB00000002", "Barracuda", "Heart", "Classics", 261900),
+			},
+			outcome:  Matched,
+			wantISRC: "BBBB00000002",
+		},
+		{
+			name: "a remastered wanted track prefers the remastered release",
+			want: track.Track{Title: "One Way Or Another - Remastered 2001", Artists: []string{"Blondie"}, DurationMS: 212000},
+			cands: []Candidate{
+				cand("AAAA00000001", "One Way Or Another", "Blondie", "", 211000),
+				cand("BBBB00000002", "One Way Or Another (Remastered 2001)", "Blondie", "", 214000),
+			},
+			outcome:  Matched,
+			wantISRC: "BBBB00000002",
+		},
+		{
+			name: "a plain wanted track prefers the plain release",
+			want: track.Track{Title: "One Way Or Another", Artists: []string{"Blondie"}, DurationMS: 212000},
+			cands: []Candidate{
+				cand("AAAA00000001", "One Way Or Another", "Blondie", "", 211000),
+				cand("BBBB00000002", "One Way Or Another (Remastered 2001)", "Blondie", "", 214000),
+			},
+			outcome:  Matched,
+			wantISRC: "AAAA00000001",
+		},
+		{
+			name: "two equally good remasters: the first is taken",
+			want: track.Track{Title: "Song - Remastered", Artists: []string{"A"}, DurationMS: 200000},
+			cands: []Candidate{
+				cand("AAAA00000001", "Song (Remastered 2001)", "A", "", 200500),
+				cand("BBBB00000002", "Song (Remastered 2011)", "A", "", 200500),
+			},
+			outcome:  Matched,
+			wantISRC: "AAAA00000001",
 		},
 		{
 			name: "same ISRC listed twice is one recording",

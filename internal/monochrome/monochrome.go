@@ -14,9 +14,12 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jigsmiths/dredge/internal/match"
 )
 
 const (
@@ -218,18 +221,68 @@ func (f *flexString) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type searchResponse struct {
-	Tracks []struct {
-		ID          flexString `json:"id"`
-		TrackID     flexString `json:"trackId"`
-		Title       string     `json:"title"`
-		ArtistNames []string   `json:"artistNames"`
-		ISRC        string     `json:"isrc"`
-		Playable    *bool      `json:"playable"`
-		Duration    int        `json:"duration"`
-		ReleaseID   flexString `json:"releaseId"`
-		Artwork     string     `json:"artwork"`
-	} `json:"tracks"`
+type rawTrack struct {
+	ID          flexString `json:"id"`
+	TrackID     flexString `json:"trackId"`
+	Title       string     `json:"title"`
+	ArtistNames []string   `json:"artistNames"`
+	ISRC        string     `json:"isrc"`
+	Playable    *bool      `json:"playable"`
+	Duration    int        `json:"duration"`
+	ReleaseID   flexString `json:"releaseId"`
+	Artwork     string     `json:"artwork"`
+}
+
+// id is what /track/{id} wants: trackId in listings, id in searches. Empty
+// when the entry cannot be downloaded.
+func (r rawTrack) id() string {
+	id := string(r.TrackID)
+	if id == "" {
+		id = string(r.ID)
+	}
+	if !digitsRe.MatchString(id) || (r.Playable != nil && !*r.Playable) {
+		return ""
+	}
+	return id
+}
+
+func (c *Client) search(ctx context.Context, base, q string, limit int) ([]rawTrack, error) {
+	resp, err := c.getRetry(ctx, base+"/search/tracks?"+url.Values{"q": {q}, "limit": {strconv.Itoa(limit)}}.Encode())
+	if err != nil {
+		return nil, fmt.Errorf("monochrome: search: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var sr struct {
+		Tracks []rawTrack `json:"tracks"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxPage)).Decode(&sr); err != nil {
+		return nil, fmt.Errorf("monochrome: search: invalid response: %w", err)
+	}
+	return sr.Tracks, nil
+}
+
+// Search returns what the catalogue lists for a free-text query as match
+// candidates. Only downloadable entries with an ISRC are included, so a match
+// is also a promise that the track can be fetched.
+func (c *Client) Search(ctx context.Context, query string, limit int) ([]match.Candidate, error) {
+	base, err := c.apiBase(ctx)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := c.search(ctx, base, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	var out []match.Candidate
+	for _, t := range raw {
+		if t.id() == "" || strings.TrimSpace(t.ISRC) == "" {
+			continue
+		}
+		out = append(out, match.Candidate{
+			ISRC: strings.ToUpper(strings.TrimSpace(t.ISRC)), Title: t.Title, Artists: t.ArtistNames, DurationMS: t.Duration,
+		})
+	}
+	return out, nil
 }
 
 var (
@@ -269,28 +322,17 @@ func (c *Client) Find(ctx context.Context, isrc, artist, title string) (Track, e
 		return Track{}, err
 	}
 	for _, q := range queries(artist, title) {
-		resp, err := c.getRetry(ctx, base+"/search/tracks?"+url.Values{"q": {q}, "limit": {"25"}}.Encode())
+		raw, err := c.search(ctx, base, q, 25)
 		if err != nil {
-			return Track{}, fmt.Errorf("monochrome: search: %w", err)
+			return Track{}, err
 		}
-		var sr searchResponse
-		err = json.NewDecoder(io.LimitReader(resp.Body, maxPage)).Decode(&sr)
-		_ = resp.Body.Close()
-		if err != nil {
-			return Track{}, fmt.Errorf("monochrome: search: invalid response: %w", err)
-		}
-		for _, t := range sr.Tracks {
-			id := string(t.TrackID)
-			if id == "" {
-				id = string(t.ID)
+		for _, t := range raw {
+			if id := t.id(); id != "" && strings.ToUpper(strings.TrimSpace(t.ISRC)) == isrc {
+				return Track{
+					ID: id, Title: t.Title, Artists: t.ArtistNames, ISRC: isrc, DurationMS: t.Duration,
+					ReleaseID: string(t.ReleaseID), ArtworkURL: t.Artwork,
+				}, nil
 			}
-			if strings.ToUpper(strings.TrimSpace(t.ISRC)) != isrc || (t.Playable != nil && !*t.Playable) || !digitsRe.MatchString(id) {
-				continue
-			}
-			return Track{
-				ID: id, Title: t.Title, Artists: t.ArtistNames, ISRC: isrc, DurationMS: t.Duration,
-				ReleaseID: string(t.ReleaseID), ArtworkURL: t.Artwork,
-			}, nil
 		}
 	}
 	return Track{}, ErrNotStocked

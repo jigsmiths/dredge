@@ -23,18 +23,35 @@ type Track struct {
 	SourceID    string // e.g. a Spotify track id
 }
 
-// Credit and remaster tags describe the release; live, remix, acoustic and
-// radio edit tags change the recording, so they stay.
+// Credit, remaster and album-version tags describe the release; live, remix,
+// acoustic and radio edit tags change the recording, so they stay.
 var (
 	creditTag    = regexp.MustCompile(`(?i)[(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s[^)\]]*[)\]]`)
-	remasterTag  = regexp.MustCompile(`(?i)[(\[]\s*(?:\d{4}\s+)?(?:digital\s+)?remaster(?:ed)?(?:\s+\d{4})?(?:\s+version)?\s*[)\]]`)
 	dashCredit   = regexp.MustCompile(`(?i)\s-\s*(?:feat\.?|ft\.?|featuring|with)\s.*$`)
-	dashRemaster = regexp.MustCompile(`(?i)\s-\s*(?:\d{4}\s+)?(?:digital\s+)?remaster(?:ed)?(?:\s+\d{4})?(?:\s+version)?\s*$`)
+	dashAlbum    = regexp.MustCompile(`(?i)\s-\s*(?:original\s+)?album\s+version\s*$`)
+	remasterTag  = regexp.MustCompile(`(?i)[(\[]\s*(?:\d{4}\s+)?(?:[a-z]+\s+){0,2}(?:digital\s+)?remaster(?:ed)?(?:\s+\d{4})?(?:\s+version)?\s*[)\]]`)
+	dashRemaster = regexp.MustCompile(`(?i)\s-\s*(?:\d{4}\s*-?\s*)?(?:[a-z]+\s+){0,2}(?:digital\s+)?remaster(?:ed)?(?:\s*-?\s*\d{4})?(?:\s+version)?\s*$`)
+
+	// the remaster patterns allow a few words ("2015 Paisley Park Remaster"),
+	// which must not swallow a word that marks a different recording
+	differentRecording = regexp.MustCompile(`(?i)\b(?:live|remix|mix|edit|acoustic|demo|instrumental|karaoke|cover)\b`)
 )
 
+func stripRelease(re *regexp.Regexp, s string) string {
+	return re.ReplaceAllStringFunc(s, func(m string) string {
+		if differentRecording.MatchString(m) {
+			return m
+		}
+		return " "
+	})
+}
+
 func NormTitle(s string) string {
-	for _, re := range []*regexp.Regexp{creditTag, remasterTag, dashCredit, dashRemaster} {
+	for _, re := range []*regexp.Regexp{creditTag, dashCredit, dashAlbum} {
 		s = re.ReplaceAllString(s, " ")
+	}
+	for _, re := range []*regexp.Regexp{remasterTag, dashRemaster} {
+		s = stripRelease(re, s)
 	}
 	return normalize(s)
 }

@@ -106,6 +106,41 @@ func TestFindDiscoversTheAPIAndMatchesByISRC(t *testing.T) {
 	}
 }
 
+func TestSearchReturnsPlayableCandidatesWithTheirISRC(t *testing.T) {
+	f := newFake(t)
+	f.search = func(string) string {
+		return `{"tracks":[
+			{"id":"1","trackId":"1","title":"Barracuda","artistNames":["Heart"],"isrc":"USSM10009075","playable":true,"duration":261933},
+			{"id":"2","trackId":"2","title":"Barracuda (Live)","artistNames":["Heart"],"isrc":"GBCBR1600287","playable":false,"duration":325000},
+			{"id":"3","trackId":"3","title":"No ISRC","artistNames":["Heart"],"isrc":"","playable":true,"duration":1},
+			{"id":"4","trackId":"4","title":"Crazy On You","artistNames":["Heart","Guest"],"isrc":"USCA28600007","duration":293440}]}`
+	}
+	got, err := f.client().Search(context.Background(), "Heart barracuda", 25)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d candidates, want the 2 playable ones with an ISRC: %+v", len(got), got)
+	}
+	if got[0].ISRC != "USSM10009075" || got[0].Title != "Barracuda" || got[0].Artists[0] != "Heart" || got[0].DurationMS != 261933 {
+		t.Errorf("first = %+v", got[0])
+	}
+	if len(got[1].Artists) != 2 || got[1].ISRC != "USCA28600007" {
+		t.Errorf("second = %+v", got[1])
+	}
+	if len(f.searches) != 1 || f.searches[0] != "Heart barracuda" {
+		t.Errorf("queries = %v, want the query passed through as given", f.searches)
+	}
+}
+
+func TestSearchSurfacesTransportErrors(t *testing.T) {
+	f := newFake(t)
+	f.statuses = []int{502, 502, 502}
+	if _, err := f.client().Search(context.Background(), "x", 5); err == nil {
+		t.Fatal("want an error when the API keeps failing")
+	}
+}
+
 func TestFindIgnoresCaseAndSpaceInTheISRC(t *testing.T) {
 	f := newFake(t)
 	if _, err := f.client().Find(context.Background(), " ussm10009075 ", "Heart", "Barracuda"); err != nil {

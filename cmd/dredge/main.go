@@ -13,7 +13,6 @@ import (
 
 	"github.com/jigsmiths/dredge/internal/config"
 	"github.com/jigsmiths/dredge/internal/db"
-	"github.com/jigsmiths/dredge/internal/deezer"
 	"github.com/jigsmiths/dredge/internal/download"
 	"github.com/jigsmiths/dredge/internal/library"
 	"github.com/jigsmiths/dredge/internal/monochrome"
@@ -70,10 +69,11 @@ func openReal(cfg *config.Config) (*deps, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening %s: %w", cfg.DBPath, err)
 	}
+	mono := monochrome.New("", "", nil)
 	return &deps{
 		spotify: spotify.New("", "", nil),
-		search:  deezer.New("", nil),
-		source:  monochrome.New("", "", nil),
+		search:  mono,
+		source:  mono,
 		index:   library.NewIndex(conn),
 		close:   func() { _ = conn.Close() },
 	}, nil

@@ -96,7 +96,7 @@ func TestNoMatchAndAmbiguousSayWhy(t *testing.T) {
 	}}
 	got := Resolve(context.Background(), []track.Track{
 		tr("Unknown", "Nobody", 1000),
-		tr("Song", "A", 100000),
+		tr("Song", "A", 0), // no length to tell the recordings apart by
 	}, &fakeLib{}, s, 2)
 	if got[0].Status != NoMatch || got[0].Reason == "" {
 		t.Errorf("first = %+v", got[0])
@@ -142,12 +142,45 @@ func TestTheSameRecordingTwiceInAPlaylistIsOneDownload(t *testing.T) {
 }
 
 func TestQueryDropsReleaseTagsAndKeepsTheFirstArtist(t *testing.T) {
-	s := &fakeSearch{}
-	Resolve(context.Background(), []track.Track{{
-		Title: "Crazy On You - 2004 Remaster", Artists: []string{"Heart", "Guest"}, DurationMS: 1,
+	s := &fakeSearch{results: map[string][]match.Candidate{
+		"Heart crazy on you": {cand("USCA28600007", "Crazy On You", "Heart", 1000)},
+	}}
+	got := Resolve(context.Background(), []track.Track{{
+		Title: "Crazy On You - 2004 Remaster", Artists: []string{"Heart", "Guest"}, DurationMS: 1000,
 	}}, &fakeLib{}, s, 1)
-	if len(s.queries) != 1 || s.queries[0] != "Heart crazy on you" {
+	if len(s.queries) != 1 || s.queries[0] != "Heart crazy on you" || got[0].Status != Need {
+		t.Errorf("queries = %v, status = %v", s.queries, got[0].Status)
+	}
+}
+
+func TestRetriesWithTheTitleAloneWhenTheArtistQueryFindsNothing(t *testing.T) {
+	s := &fakeSearch{results: map[string][]match.Candidate{
+		"free bird": {cand("USMC17301722", "Free Bird", "Lynyrd Skynyrd", 558000)},
+	}}
+	got := Resolve(context.Background(), []track.Track{tr("Free Bird", "Lynyrd Skynyrd", 558000)}, &fakeLib{}, s, 1)
+	if got[0].Status != Need || got[0].Track.ISRC != "USMC17301722" {
+		t.Fatalf("got %+v", got[0])
+	}
+	if len(s.queries) != 2 || s.queries[0] != "Lynyrd Skynyrd free bird" || s.queries[1] != "free bird" {
 		t.Errorf("queries = %v", s.queries)
+	}
+}
+
+func TestDoesNotRetryOnceTheFirstQueryDecided(t *testing.T) {
+	s := &fakeSearch{results: map[string][]match.Candidate{
+		"A song": {cand("X", "Song", "A", 100000), cand("Y", "Song", "A", 100000)},
+	}}
+	got := Resolve(context.Background(), []track.Track{tr("Song", "A", 0)}, &fakeLib{}, s, 1)
+	if got[0].Status != Ambiguous || len(s.queries) != 1 {
+		t.Errorf("status = %v after %d queries, want ambiguous after 1", got[0].Status, len(s.queries))
+	}
+}
+
+func TestAnErrorOnTheSecondQueryFailsTheItem(t *testing.T) {
+	s := &fakeSearch{errFor: map[string]error{"free bird": errors.New("api down")}}
+	got := Resolve(context.Background(), []track.Track{tr("Free Bird", "Lynyrd Skynyrd", 1000)}, &fakeLib{}, s, 1)
+	if got[0].Status != Failed || !strings.Contains(got[0].Reason, "api down") {
+		t.Errorf("got %+v", got[0])
 	}
 }
 

@@ -3,14 +3,15 @@ package match
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 
 	"github.com/jigsmiths/dredge/internal/track"
 )
 
 const (
-	// Spotify and Deezer disagree by about 2.5s on the same recording.
-	DurationToleranceMS = 3000
+	// Catalogues disagree by up to about 4s on the same recording.
+	DurationToleranceMS = 5000
 
 	// How much closer in length a recording must be to beat another outright.
 	TieMarginMS = 1000
@@ -104,8 +105,25 @@ func Pick(want track.Track, cands []Candidate) Result {
 			return Result{Outcome: Matched, Best: byAlbum[0].c, Reason: "same album"}
 		}
 	}
+	// still tied: a remastered track wants the remastered release, a plain one the plain
+	wantRemaster := remasterRe.MatchString(want.Title)
+	var agree []scored
+	for _, s := range ok {
+		if s.dist-best.dist <= TieMarginMS && remasterRe.MatchString(s.c.Title) == wantRemaster {
+			agree = append(agree, s)
+		}
+	}
+	if len(agree) > 0 && len(distinctISRC(agree, agree[0].c.ISRC)) == 0 {
+		return Result{Outcome: Matched, Best: agree[0].c, Reason: "same release tag"}
+	}
+	if want.DurationMS > 0 {
+		// same title, artist and length within a second: releases of one recording
+		return Result{Outcome: Matched, Best: best.c, Reason: fmt.Sprintf("%d releases fit equally well; took the closest", len(rivals)+1)}
+	}
 	return Result{Outcome: Ambiguous, Reason: fmt.Sprintf("%d different recordings fit equally well", len(rivals)+1)}
 }
+
+var remasterRe = regexp.MustCompile(`(?i)\bremaster`)
 
 func distinctISRC(cs []scored, isrc string) []scored {
 	var out []scored
