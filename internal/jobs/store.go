@@ -33,6 +33,7 @@ const (
 	TrackAmbiguous   = "ambiguous"
 	TrackDuplicate   = "duplicate"
 	TrackNotStocked  = "not_stocked"
+	TrackLossyOnly   = "lossy_only"
 	TrackFailed      = "failed"
 )
 

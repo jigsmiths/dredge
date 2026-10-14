@@ -22,6 +22,8 @@ type Options struct {
 	Search resolve.Searcher
 	Scan   func(context.Context) (library.ScanStats, error)
 	APIKey string // when set, /api needs it in X-Api-Key
+
+	Version string // shown by /health and the page
 }
 
 type api struct{ Options }

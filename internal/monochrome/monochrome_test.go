@@ -311,6 +311,20 @@ func TestDownloadRejectsAnythingThatIsNotFLAC(t *testing.T) {
 	}
 }
 
+func TestDownloadNamesALossyOnlyTrack(t *testing.T) {
+	f := newFake(t)
+	mp4 := append([]byte("\x00\x00\x00\x1cftypisom"), bytes.Repeat([]byte{1}, 100)...)
+	f.track = func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(mp4) }
+	var buf bytes.Buffer
+	_, err := f.client().Download(context.Background(), Track{ID: "1"}, &buf)
+	if !errors.Is(err, ErrLossyOnly) {
+		t.Fatalf("err = %v, want ErrLossyOnly", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("wrote %d bytes of a lossy download", buf.Len())
+	}
+}
+
 func TestDownloadDetectsATruncatedBody(t *testing.T) {
 	f := newFake(t)
 	f.track = func(w http.ResponseWriter, r *http.Request) {

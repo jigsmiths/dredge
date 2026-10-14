@@ -313,6 +313,8 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 				status = TrackDone
 			case r.Outcome == download.NotStocked:
 				status = TrackNotStocked
+			case r.Outcome == download.LossyOnly:
+				status = TrackLossyOnly
 			case r.Err != nil && ctx.Err() != nil:
 				status = TrackPending // cut short, not failed
 			case r.Err != nil:

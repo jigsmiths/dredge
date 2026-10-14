@@ -36,6 +36,7 @@ const (
 	Exists             // a file is already at the destination; left alone
 	NotStocked         // the catalogue does not have the recording
 	Skipped            // nothing to download for this item
+	LossyOnly          // the catalogue only serves it as AAC
 	Failed
 )
 
@@ -49,6 +50,8 @@ func (o Outcome) String() string {
 		return "not_stocked"
 	case Skipped:
 		return "skipped"
+	case LossyOnly:
+		return "lossy_only"
 	}
 	return "failed"
 }
@@ -153,6 +156,9 @@ func one(ctx context.Context, it resolve.Item, src Source, rec Recorder, opt Opt
 		fctx = monochrome.WithProgress(ctx, func(done, total int64) { opt.Bytes(it, done, total) })
 	}
 	tmp, err := fetch(fctx, src, mono, filepath.Dir(dst), tagsFor(it, cover), opt)
+	if errors.Is(err, monochrome.ErrLossyOnly) {
+		return Result{Item: it, Outcome: LossyOnly}
+	}
 	if err != nil {
 		return fail("download: %w", err)
 	}
@@ -205,7 +211,7 @@ func fetch(ctx context.Context, src Source, mono monochrome.Track, dir string, t
 		if name, err = fetchOnce(ctx, src, mono, dir, tags); err == nil {
 			return name, nil
 		}
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || errors.Is(err, monochrome.ErrLossyOnly) {
 			break
 		}
 	}

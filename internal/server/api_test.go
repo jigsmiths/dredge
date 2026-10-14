@@ -28,7 +28,7 @@ func newServer(t *testing.T, key string) http.Handler {
 	t.Cleanup(func() { _ = conn.Close() })
 	m := jobs.NewManager(jobs.NewStore(conn), jobs.Deps{})
 	return New(Options{
-		Jobs: m, APIKey: key, Search: fakeSearch{},
+		Jobs: m, APIKey: key, Search: fakeSearch{}, Version: "1.2.3",
 		Scan: func(context.Context) (library.ScanStats, error) { return library.ScanStats{Files: 7, Indexed: 2}, nil },
 	})
 }
@@ -148,6 +148,14 @@ func TestHealthAndTheUIStayOpenWhateverTheKey(t *testing.T) {
 	}
 	if code, _, _ := call(t, h, "GET", "/", ""); code != http.StatusOK {
 		t.Errorf("ui = %d", code)
+	}
+}
+
+func TestHealthReportsTheVersionWithoutAKey(t *testing.T) {
+	h := newServer(t, "s3cret")
+	code, m, _ := call(t, h, "GET", "/health", "")
+	if code != http.StatusOK || m["status"] != "ok" || m["version"] != "1.2.3" {
+		t.Errorf("health = %d %v", code, m)
 	}
 }
 

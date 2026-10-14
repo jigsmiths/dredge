@@ -11,6 +11,12 @@
   let hits = $state<Hit[] | null>(null);
   let searched = $state("");
   let busy = $state(false);
+  let version = $state("");
+
+  fetch("/health")
+    .then((r) => r.json())
+    .then((h) => (version = h.version ?? ""))
+    .catch(() => {});
 
   const fromHash = () => {
     const m = location.hash.match(/^#\/jobs\/(\d+)$/);
@@ -93,7 +99,7 @@
   const c = (j: Job, k: string) => j.counts[k] ?? 0;
   const finished = (j: Job) => j.total - c(j, "pending") - c(j, "downloading");
   const problems = (j: Job) =>
-    c(j, "failed") + c(j, "not_stocked") + c(j, "no_match") + c(j, "ambiguous");
+    c(j, "failed") + c(j, "not_stocked") + c(j, "lossy_only") + c(j, "no_match") + c(j, "ambiguous");
   const current = $derived(jobs.filter(active));
   const history = $derived(jobs.filter((j) => !active(j)));
 </script>
@@ -101,6 +107,14 @@
 <main>
   <header>
     <h1><a href="#/">dredge</a></h1>
+    {#if version}
+      <a
+        class="version"
+        href={version === "dev" ? undefined : `https://github.com/jigsmiths/dredge/releases/tag/v${version}`}
+        target="_blank"
+        rel="noopener noreferrer">{version}</a
+      >
+    {/if}
   </header>
 
   {#if needKey}
@@ -169,9 +183,24 @@
     margin: 2rem auto;
     padding: 0 1rem;
   }
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+  }
   h1 a {
     color: inherit;
     text-decoration: none;
+  }
+  .version {
+    font-family: ui-monospace, monospace;
+    font-size: 0.8rem;
+    color: #888;
+    text-decoration: none;
+  }
+  .version:hover {
+    color: #ccc;
+    text-decoration: underline;
   }
   h2 {
     font-size: 0.85rem;
