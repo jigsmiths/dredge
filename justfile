@@ -1,4 +1,4 @@
-BINARY_NAME := "APP_NAME"
+BINARY_NAME := "dredge"
 BINARY_PATH := "./" + BINARY_NAME
 CMD_PATH := "./cmd/" + BINARY_NAME
 VERSION := `git describe --tags --always --dirty 2>/dev/null || echo "dev"`
@@ -46,7 +46,7 @@ install: build
 
 test:
     @echo "Running tests..."
-    @go test ./...
+    @go test -race ./...
 
 test-verbose:
     @echo "Running tests (verbose)..."
@@ -60,12 +60,21 @@ test-coverage:
 
 fmt:
     @echo "Formatting code..."
-    @go fmt ./...
+    @gofmt -w .
     @echo "Format complete"
 
 lint:
-    @echo "Running linter..."
-    @golangci-lint run ./... 2>/dev/null || echo "golangci-lint not installed. Install with: brew install golangci-lint"
+    @golangci-lint run ./...
+
+# Same checks as CI and the pre-commit hook
+check:
+    test -z "$(gofmt -l .)"
+    just lint
+    just test
+
+# Point git at the repo hooks
+setup:
+    git config core.hooksPath .githooks
 
 clean:
     @echo "Cleaning build artifacts..."
@@ -78,31 +87,4 @@ clean:
 # Requires: go install github.com/caarlos0/svu/v3@latest
 version:
     @echo "Current: $(svu current)"
-    @echo "Next:    $(svu next)"
-
-# Create a local git tag for the next version derived from conventional commits
-tag:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    NEXT=$(svu next)
-    CURRENT=$(svu current)
-    if [ "$NEXT" = "$CURRENT" ]; then
-        echo "No commits requiring a version bump since $CURRENT"
-        exit 0
-    fi
-    git tag "$NEXT"
-    echo "Tagged $NEXT"
-
-# Tag and push to origin — triggers the goreleaser release workflow
-release:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    NEXT=$(svu next)
-    CURRENT=$(svu current)
-    if [ "$NEXT" = "$CURRENT" ]; then
-        echo "No commits requiring a version bump since $CURRENT"
-        exit 0
-    fi
-    git tag "$NEXT"
-    git push origin "$NEXT"
-    echo "Released $NEXT"
+    @echo "Next:    $(svu next --v0)"

@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strings"
 
-	"MODULE_PATH/web"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jigsmiths/dredge/web"
 )
 
 func New() http.Handler {
