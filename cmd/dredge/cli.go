@@ -18,9 +18,10 @@ import (
 )
 
 type options struct {
-	cfg    config.Config
-	noScan bool
-	args   []string // positional arguments
+	cfg      config.Config
+	noScan   bool
+	attempts int
+	args     []string // positional arguments
 }
 
 // parseFlags reads flags and positional arguments in any order.
@@ -33,6 +34,7 @@ func parseFlags(name string, e *env, args []string) (*options, error) {
 	fs.IntVar(&o.cfg.Workers, "workers", o.cfg.Workers, "")
 	fs.StringVar(&o.cfg.DBPath, "db", o.cfg.DBPath, "")
 	fs.BoolVar(&o.noScan, "no-scan", false, "")
+	fs.IntVar(&o.attempts, "attempts", 3, "")
 	for {
 		if err := fs.Parse(args); err != nil {
 			return nil, usageError{fmt.Sprintf("%s: %v\n\n%s", name, err, usage)}
@@ -48,6 +50,9 @@ func parseFlags(name string, e *env, args []string) (*options, error) {
 	}
 	if o.cfg.Workers < 1 {
 		return nil, usageError{"--workers must be at least 1"}
+	}
+	if o.attempts < 1 {
+		return nil, usageError{"--attempts must be at least 1"}
 	}
 	return o, nil
 }
@@ -241,7 +246,7 @@ func (s *session) get(ctx context.Context, e *env) error {
 	} else {
 		say(e.out, "downloading %s\n", plural(need, "track"))
 		results = download.Run(ctx, s.items, s.d.source, s.d.index, download.Options{
-			Layout: s.layout, Kind: kind, Workers: s.o.cfg.Workers,
+			Layout: s.layout, Kind: kind, Workers: s.o.cfg.Workers, Attempts: s.o.attempts,
 			Progress: func(r download.Result) { progress(e, s, r) },
 		})
 	}

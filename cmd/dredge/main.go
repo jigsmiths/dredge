@@ -35,6 +35,7 @@ flags (resolve, get, scan):
   --singles-dir NAME  folder for singles under the library root (env DREDGE_SINGLES_DIR)
   --workers N         parallel lookups and downloads (env WORKERS)
   --db PATH           index database (env DB_PATH)
+  --attempts N        get: tries per track before giving up (default 3)
   --no-scan           resolve and get: do not refresh the index first`
 
 type fetcher interface {

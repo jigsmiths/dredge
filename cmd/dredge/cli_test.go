@@ -272,7 +272,7 @@ func TestGetReportsFailuresButFinishesTheRest(t *testing.T) {
 	r.search.results["Muse uprising"] = []match.Candidate{cand("GBAHT0900123", "Uprising", "Muse", 305000)}
 	r.src.stocked["GBAHT0900123"] = true
 	r.src.failFor = map[string]error{"GBAHT0900123": errors.New("connection reset")}
-	err := r.run("get", link("playlist", playlistID))
+	err := r.run("get", "--attempts", "1", link("playlist", playlistID))
 	if err == nil || !strings.Contains(err.Error(), "1 track failed") {
 		t.Fatalf("err = %v, want one saying 1 track failed", err)
 	}
@@ -371,6 +371,7 @@ func TestUsageErrors(t *testing.T) {
 		"not a spotify url": {[]string{"get", "Heart - Barracuda"}, "not a spotify link"},
 		"artist link":       {[]string{"get", "https://open.spotify.com/artist/5PlfkPxwCpRRWQJBxCa0By"}, "not supported"},
 		"bad workers":       {[]string{"get", "--workers", "0", link("track", trackID)}, "workers"},
+		"bad attempts":      {[]string{"get", "--attempts", "0", link("track", trackID)}, "attempts"},
 		"unknown flag":      {[]string{"get", "--nope", link("track", trackID)}, "nope"},
 	} {
 		t.Run(name, func(t *testing.T) {

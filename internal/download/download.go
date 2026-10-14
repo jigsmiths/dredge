@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/jigsmiths/dredge/internal/flacmeta"
 	"github.com/jigsmiths/dredge/internal/library"
@@ -60,11 +61,29 @@ type Result struct {
 	Err     error
 }
 
+const defaultAttempts = 3
+
 type Options struct {
 	Layout   library.Layout
 	Kind     library.Kind
 	Workers  int
-	Progress func(Result) // called once per item, one at a time
+	Attempts int                       // tries per track; 3 if zero
+	Backoff  func(n int) time.Duration // wait before retry n; 3s times n if nil
+	Progress func(Result)              // called once per item, one at a time
+}
+
+func (o Options) attempts() int {
+	if o.Attempts < 1 {
+		return defaultAttempts
+	}
+	return o.Attempts
+}
+
+func (o Options) backoff(n int) time.Duration {
+	if o.Backoff != nil {
+		return o.Backoff(n)
+	}
+	return time.Duration(n) * 3 * time.Second
 }
 
 // Run downloads the Need items with at most Workers at once and returns a
@@ -122,37 +141,23 @@ func one(ctx context.Context, it resolve.Item, src Source, rec Recorder, opt Opt
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fail("%w", err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".dredge-*.part")
+	tmp, err := fetch(ctx, src, mono, filepath.Dir(dst), tagsFor(it, cover), opt)
 	if err != nil {
-		return fail("%w", err)
+		return fail("download: %w", err)
 	}
 	placed := false
 	defer func() {
 		if !placed {
-			_ = tmp.Close()
-			_ = os.Remove(tmp.Name())
+			_ = os.Remove(tmp)
 		}
 	}()
-
-	if err := stream(ctx, src, mono, tmp, tagsFor(it, cover)); err != nil {
-		return fail("download: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		return fail("%w", err)
-	}
-	if err := tmp.Chmod(0o644); err != nil {
-		return fail("%w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fail("%w", err)
-	}
 
 	place.Lock()
 	if exists(dst) {
 		place.Unlock()
 		return Result{Item: it, Outcome: Exists, Path: dst}
 	}
-	err = os.Rename(tmp.Name(), dst)
+	err = os.Rename(tmp, dst)
 	place.Unlock()
 	if err != nil {
 		return fail("%w", err)
@@ -172,6 +177,68 @@ func one(ctx context.Context, it resolve.Item, src Source, rec Recorder, opt Opt
 		r.Outcome, r.Err = Failed, fmt.Errorf("downloaded to %s but not indexed: %w", dst, err)
 	}
 	return r
+}
+
+// fetch downloads into a temp file in dir and returns its path. A transient
+// failure, such as the stream errors a long download can hit, is retried from
+// the start with a growing wait; a cancelled run is not.
+func fetch(ctx context.Context, src Source, mono monochrome.Track, dir string, tags flacmeta.Tags, opt Options) (string, error) {
+	var err error
+	for n := 1; n <= opt.attempts(); n++ {
+		if n > 1 {
+			if serr := wait(ctx, opt.backoff(n-1)); serr != nil {
+				return "", serr
+			}
+		}
+		var name string
+		if name, err = fetchOnce(ctx, src, mono, dir, tags); err == nil {
+			return name, nil
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return "", err
+}
+
+func fetchOnce(ctx context.Context, src Source, mono monochrome.Track, dir string, tags flacmeta.Tags) (name string, err error) {
+	tmp, err := os.CreateTemp(dir, ".dredge-*.part")
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if err != nil {
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name())
+		}
+	}()
+	if err = stream(ctx, src, mono, tmp, tags); err != nil {
+		return "", err
+	}
+	if err = tmp.Sync(); err != nil {
+		return "", err
+	}
+	if err = tmp.Chmod(0o644); err != nil {
+		return "", err
+	}
+	if err = tmp.Close(); err != nil {
+		return "", err
+	}
+	return tmp.Name(), nil
+}
+
+func wait(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func exists(path string) bool {

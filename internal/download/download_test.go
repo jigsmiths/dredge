@@ -108,7 +108,7 @@ func need(isrc, title, artist string) resolve.Item {
 
 func setup(t *testing.T) (Options, string) {
 	root := t.TempDir()
-	return Options{Layout: library.Layout{Root: root, SinglesDir: "Singles"}, Workers: 4}, root
+	return Options{Layout: library.Layout{Root: root, SinglesDir: "Singles"}, Workers: 4, Backoff: noBackoff}, root
 }
 
 func files(t *testing.T, root string) []string {
@@ -393,6 +393,87 @@ func TestCancellationStopsAndCleansUp(t *testing.T) {
 	}
 	if got := files(t, root); len(got) != 0 {
 		t.Errorf("files left behind: %v", got)
+	}
+}
+
+func noBackoff(int) time.Duration { return 0 }
+
+func TestTransientDownloadErrorsAreRetried(t *testing.T) {
+	opt, root := setup(t)
+	opt.Backoff = noBackoff
+	var calls atomic.Int32
+	src := &fakeSource{stocked: map[string]bool{"I": true}, body: func(w io.Writer) error {
+		if calls.Add(1) < 3 {
+			_, _ = w.Write(flacFile()[:30])
+			return errors.New("stream error: INTERNAL_ERROR; received from peer")
+		}
+		_, err := w.Write(flacFile())
+		return err
+	}}
+	rec := &fakeRecorder{}
+	res := Run(context.Background(), []resolve.Item{need("I", "Barracuda", "Heart")}, src, rec, opt)
+	if res[0].Outcome != Downloaded || res[0].Err != nil {
+		t.Fatalf("result = %+v", res[0])
+	}
+	if calls.Load() != 3 || len(rec.entries) != 1 || len(files(t, root)) != 1 {
+		t.Errorf("attempts = %d, recorded = %d, files = %v", calls.Load(), len(rec.entries), files(t, root))
+	}
+}
+
+func TestGivesUpAfterTheAttemptLimit(t *testing.T) {
+	opt, root := setup(t)
+	opt.Backoff = noBackoff
+	var calls atomic.Int32
+	src := &fakeSource{stocked: map[string]bool{"I": true}, body: func(io.Writer) error {
+		calls.Add(1)
+		return errors.New("connection reset")
+	}}
+	res := Run(context.Background(), []resolve.Item{need("I", "Barracuda", "Heart")}, src, &fakeRecorder{}, opt)
+	if res[0].Outcome != Failed || calls.Load() != 3 {
+		t.Errorf("outcome = %v after %d attempts, want failed after 3", res[0].Outcome, calls.Load())
+	}
+	if len(files(t, root)) != 0 {
+		t.Errorf("files left behind: %v", files(t, root))
+	}
+}
+
+func TestAttemptsCanBeSetToOne(t *testing.T) {
+	opt, _ := setup(t)
+	opt.Attempts = 1
+	var calls atomic.Int32
+	src := &fakeSource{stocked: map[string]bool{"I": true}, body: func(io.Writer) error {
+		calls.Add(1)
+		return errors.New("boom")
+	}}
+	Run(context.Background(), []resolve.Item{need("I", "Barracuda", "Heart")}, src, &fakeRecorder{}, opt)
+	if calls.Load() != 1 {
+		t.Errorf("made %d attempts, want 1", calls.Load())
+	}
+}
+
+func TestACancelledDownloadIsNotRetried(t *testing.T) {
+	opt, _ := setup(t)
+	opt.Backoff = noBackoff
+	ctx, cancel := context.WithCancel(context.Background())
+	src := &fakeSource{stocked: map[string]bool{"a": true}, hold: time.Second}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	Run(ctx, []resolve.Item{need("a", "A", "X")}, src, &fakeRecorder{}, opt)
+	if src.downloads != 1 {
+		t.Errorf("made %d attempts after cancellation, want 1", src.downloads)
+	}
+}
+
+func TestBackoffGrowsBetweenAttempts(t *testing.T) {
+	opt, _ := setup(t)
+	var waits []time.Duration
+	opt.Backoff = func(n int) time.Duration { waits = append(waits, time.Duration(n)); return 0 }
+	src := &fakeSource{stocked: map[string]bool{"I": true}, body: func(io.Writer) error { return errors.New("boom") }}
+	Run(context.Background(), []resolve.Item{need("I", "Barracuda", "Heart")}, src, &fakeRecorder{}, opt)
+	if len(waits) != 2 || waits[0] != 1 || waits[1] != 2 {
+		t.Errorf("backoff asked for attempts %v, want [1 2]", waits)
 	}
 }
 
