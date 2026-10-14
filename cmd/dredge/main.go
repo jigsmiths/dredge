@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -48,6 +49,7 @@ type deps struct {
 	search  resolve.Searcher
 	source  download.Source
 	index   *library.Index
+	conn    *sql.DB
 	close   func()
 }
 
@@ -76,6 +78,7 @@ func openReal(cfg *config.Config) (*deps, error) {
 		search:  mono,
 		source:  mono,
 		index:   library.NewIndex(conn),
+		conn:    conn,
 		close:   func() { _ = conn.Close() },
 	}, nil
 }
@@ -92,7 +95,7 @@ func run(ctx context.Context, e *env, args []string) error {
 	case "scan":
 		return scanCommand(ctx, e, args[1:])
 	case "serve":
-		return serve(ctx, e.cfg)
+		return serve(ctx, e)
 	case "version":
 		_, err := fmt.Fprintln(e.out, "dredge", version)
 		return err
