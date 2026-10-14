@@ -171,10 +171,16 @@ type trackData struct {
 	Artists       artistList `json:"artists"`
 	AlbumOfTrack  struct {
 		Name string `json:"name"`
+		Date struct {
+			ISOString string `json:"isoString"`
+		} `json:"date"`
+		Artists artistList `json:"artists"`
 	} `json:"albumOfTrack"`
 }
 
-func (d trackData) toTrack(album string) track.Track {
+// toTrack takes the album details from the collection when it has them (an
+// album fetch), and from the track's own album otherwise.
+func (d trackData) toTrack(album, albumArtist, date string) track.Track {
 	ms := d.TrackDuration.TotalMilliseconds
 	if ms == 0 {
 		ms = d.Duration.TotalMilliseconds
@@ -182,14 +188,24 @@ func (d trackData) toTrack(album string) track.Track {
 	if album == "" {
 		album = d.AlbumOfTrack.Name
 	}
+	if albumArtist == "" {
+		if names := d.AlbumOfTrack.Artists.names(); len(names) > 0 {
+			albumArtist = names[0]
+		}
+	}
+	if date == "" {
+		date = d.AlbumOfTrack.Date.ISOString
+	}
 	return track.Track{
-		Title:      d.Name,
-		Artists:    d.Artists.names(),
-		Album:      album,
-		DurationMS: ms,
-		DiscNo:     d.DiscNumber,
-		TrackNo:    d.TrackNumber,
-		SourceID:   d.URI[strings.LastIndex(d.URI, ":")+1:],
+		Title:       d.Name,
+		Artists:     d.Artists.names(),
+		Album:       album,
+		AlbumArtist: albumArtist,
+		Date:        date[:min(len(date), 10)],
+		DurationMS:  ms,
+		DiscNo:      d.DiscNumber,
+		TrackNo:     d.TrackNumber,
+		SourceID:    d.URI[strings.LastIndex(d.URI, ":")+1:],
 	}
 }
 
@@ -231,7 +247,7 @@ func (c *Client) playlist(ctx context.Context, ref Ref) (*Collection, error) {
 				out.Skipped++
 				continue
 			}
-			out.Tracks = append(out.Tracks, it.ItemV2.Data.toTrack(""))
+			out.Tracks = append(out.Tracks, it.ItemV2.Data.toTrack("", "", ""))
 		}
 		offset += len(pl.Content.Items)
 	}
@@ -245,7 +261,11 @@ func (c *Client) album(ctx context.Context, ref Ref) (*Collection, error) {
 		var resp struct {
 			Data struct {
 				AlbumUnion *struct {
-					Name     string `json:"name"`
+					Name string `json:"name"`
+					Date struct {
+						ISOString string `json:"isoString"`
+					} `json:"date"`
+					Artists  artistList `json:"artists"`
 					TracksV2 struct {
 						TotalCount int `json:"totalCount"`
 						Items      []struct {
@@ -269,8 +289,12 @@ func (c *Client) album(ctx context.Context, ref Ref) (*Collection, error) {
 		if len(al.TracksV2.Items) == 0 {
 			return nil, fmt.Errorf("spotify: album page at offset %d is empty, expected %d tracks", offset, total)
 		}
+		var albumArtist string
+		if names := al.Artists.names(); len(names) > 0 {
+			albumArtist = names[0]
+		}
 		for _, it := range al.TracksV2.Items {
-			out.Tracks = append(out.Tracks, it.Track.toTrack(al.Name))
+			out.Tracks = append(out.Tracks, it.Track.toTrack(al.Name, albumArtist, al.Date.ISOString))
 		}
 		offset += len(al.TracksV2.Items)
 	}
@@ -294,7 +318,7 @@ func (c *Client) track(ctx context.Context, ref Ref) (*Collection, error) {
 	if tu == nil {
 		return nil, errors.New("spotify: response has no track")
 	}
-	t := tu.toTrack("")
+	t := tu.toTrack("", "", "")
 	t.Artists = append(tu.FirstArtist.names(), tu.OtherArtists.names()...)
 	t.SourceID = ref.ID
 	return &Collection{Kind: KindTrack, Name: t.Title, Tracks: []track.Track{t}}, nil

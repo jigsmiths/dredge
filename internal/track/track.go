@@ -11,14 +11,16 @@ import (
 )
 
 type Track struct {
-	Title      string
-	Artists    []string
-	Album      string
-	DurationMS int
-	DiscNo     int
-	TrackNo    int
-	ISRC       string // empty until matched
-	SourceID   string // e.g. a Spotify track id
+	Title       string
+	Artists     []string
+	Album       string
+	AlbumArtist string
+	Date        string // YYYY-MM-DD, or less
+	DurationMS  int
+	DiscNo      int
+	TrackNo     int
+	ISRC        string // empty until matched
+	SourceID    string // e.g. a Spotify track id
 }
 
 // Credit and remaster tags describe the release; live, remix, acoustic and

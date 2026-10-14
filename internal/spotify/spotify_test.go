@@ -194,7 +194,7 @@ func TestFetchPlaylistParsesTracks(t *testing.T) {
 	first := got.Tracks[0]
 	if first.Title != "Barracuda" || len(first.Artists) != 1 || first.Artists[0] != "Heart" ||
 		first.Album != "Little Queen" || first.DurationMS != 261495 || first.SourceID != "4KfSdst7rW39C0sfhArdrz" ||
-		first.DiscNo != 1 || first.TrackNo != 1 {
+		first.DiscNo != 1 || first.TrackNo != 1 || first.AlbumArtist != "Heart" {
 		t.Errorf("first track = %+v", first)
 	}
 	if got.Tracks[2].Title != "My Sharona" || got.Tracks[2].TrackNo != 7 {
@@ -270,7 +270,8 @@ func TestFetchAlbumFixture(t *testing.T) {
 	}
 	first := got.Tracks[0]
 	if first.Title != "Barracuda" || first.Album != "Little Queen" || first.Artists[0] != "Heart" ||
-		first.DurationMS != 261495 || first.DiscNo != 1 || first.TrackNo != 1 || first.SourceID != "4KfSdst7rW39C0sfhArdrz" {
+		first.DurationMS != 261495 || first.DiscNo != 1 || first.TrackNo != 1 || first.SourceID != "4KfSdst7rW39C0sfhArdrz" ||
+		first.AlbumArtist != "Heart" || first.Date != "1977-05-14" {
 		t.Errorf("first track = %+v", first)
 	}
 }
