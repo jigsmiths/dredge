@@ -67,6 +67,7 @@ func (s *fakeSource) Find(_ context.Context, isrc, _, title string) (monochrome.
 }
 
 func (s *fakeSource) Download(ctx context.Context, t monochrome.Track, w io.Writer) (int64, error) {
+	monochrome.ReportProgress(ctx, 10, 100)
 	if s.started != nil {
 		s.started <- t.ISRC
 	}
@@ -235,6 +236,34 @@ func TestTracksShowAsDownloadingWhileTheyRun(t *testing.T) {
 	j = r.waitFor(j.ID, Running)
 	if ts := r.tracks(j.ID); ts["Barracuda"].Status != TrackDownloading || ts["Unknown"].Status != TrackNoMatch {
 		t.Errorf("while running: %+v", ts)
+	}
+	close(r.src.stall)
+	r.waitFor(j.ID, Done)
+}
+
+func TestLiveProgressShowsOnDownloadingTracksOnly(t *testing.T) {
+	r := newRig(t)
+	r.src.stall = make(chan struct{})
+	r.src.started = make(chan string, 4)
+	r.start()
+	j := r.submit(plID)
+	<-r.src.started
+	j = r.waitFor(j.ID, Running)
+	rows, err := r.m.Tracks(context.Background(), j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.m.Live(j.ID, rows)
+	var live int
+	for _, tk := range rows {
+		if tk.BytesTotal == 100 && tk.BytesDone == 10 && tk.Status == TrackDownloading {
+			live++
+		} else if tk.BytesDone != 0 {
+			t.Errorf("%s has progress but is %s", tk.Title, tk.Status)
+		}
+	}
+	if live == 0 {
+		t.Errorf("no downloading track shows progress: %+v", rows)
 	}
 	close(r.src.stall)
 	r.waitFor(j.ID, Done)

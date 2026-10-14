@@ -338,6 +338,34 @@ func (c *Client) Find(ctx context.Context, isrc, artist, title string) (Track, e
 	return Track{}, ErrNotStocked
 }
 
+type progressKey struct{}
+
+// WithProgress makes Download on ctx report bytes received so far and the
+// total size, which is -1 when the server does not say.
+func WithProgress(ctx context.Context, f func(done, total int64)) context.Context {
+	return context.WithValue(ctx, progressKey{}, f)
+}
+
+// ReportProgress calls the function set by WithProgress, if any.
+func ReportProgress(ctx context.Context, done, total int64) {
+	if f, ok := ctx.Value(progressKey{}).(func(done, total int64)); ok {
+		f(done, total)
+	}
+}
+
+type countReader struct {
+	r           io.Reader
+	done, total int64
+	f           func(done, total int64)
+}
+
+func (c *countReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.done += int64(n)
+	c.f(c.done, c.total)
+	return n, err
+}
+
 // Download streams the FLAC to w and returns the bytes written. Nothing is
 // written unless the body starts like a FLAC file.
 func (c *Client) Download(ctx context.Context, t Track, w io.Writer) (int64, error) {
@@ -370,7 +398,11 @@ func (c *Client) Download(ctx context.Context, t Track, w io.Writer) (int64, err
 	if magic, err := br.Peek(4); err != nil || !bytes.Equal(magic, []byte("fLaC")) {
 		return 0, causeOr(ctx, errors.New("monochrome: download is not a FLAC file"))
 	}
-	n, err := io.Copy(w, br)
+	var src io.Reader = br
+	if f, ok := ctx.Value(progressKey{}).(func(done, total int64)); ok {
+		src = &countReader{r: br, total: resp.ContentLength, f: f}
+	}
+	n, err := io.Copy(w, src)
 	if err != nil {
 		return n, causeOr(ctx, err)
 	}

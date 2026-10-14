@@ -22,6 +22,8 @@ export type Track = {
   path?: string;
   bytes?: number;
   reason?: string;
+  bytes_done?: number;
+  bytes_total?: number;
 };
 
 export type JobDetail = Job & { tracks: Track[] };

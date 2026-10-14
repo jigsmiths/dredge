@@ -76,6 +76,7 @@ func (s *fakeSource) Download(ctx context.Context, _ monochrome.Track, w io.Writ
 	}
 	b := flacFile()
 	_, err := w.Write(b)
+	monochrome.ReportProgress(ctx, int64(len(b)), int64(len(b)))
 	return int64(len(b)), err
 }
 
@@ -161,6 +162,18 @@ func TestDownloadsTagsAndFilesATrack(t *testing.T) {
 	}
 	if res[0].Bytes != sizeOf(want) {
 		t.Errorf("bytes = %d, want the file size %d", res[0].Bytes, sizeOf(want))
+	}
+}
+
+func TestBytesCallbackNamesTheTrack(t *testing.T) {
+	opt, _ := setup(t)
+	var got []string
+	var done, total int64
+	opt.Bytes = func(it resolve.Item, d, tot int64) { got, done, total = append(got, it.Track.ISRC), d, tot }
+	src := &fakeSource{stocked: map[string]bool{"USSM10009075": true}}
+	Run(context.Background(), []resolve.Item{need("USSM10009075", "Barracuda", "Heart")}, src, &fakeRecorder{}, opt)
+	if len(got) != 1 || got[0] != "USSM10009075" || done == 0 || done != total {
+		t.Fatalf("got=%v done=%d total=%d", got, done, total)
 	}
 }
 

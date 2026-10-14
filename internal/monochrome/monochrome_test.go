@@ -332,6 +332,22 @@ func TestDownloadNamesTheStatus(t *testing.T) {
 	}
 }
 
+func TestDownloadReportsProgress(t *testing.T) {
+	f := newFake(t)
+	f.track = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprint(len(flacBytes)))
+		_, _ = w.Write(flacBytes)
+	}
+	var last, total int64
+	ctx := WithProgress(context.Background(), func(done, tot int64) { last, total = done, tot })
+	if _, err := f.client().Download(ctx, Track{ID: "1"}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if last != int64(len(flacBytes)) || total != int64(len(flacBytes)) {
+		t.Fatalf("last=%d total=%d, want both %d", last, total, len(flacBytes))
+	}
+}
+
 func TestDownloadGivesUpOnAStalledServer(t *testing.T) {
 	f := newFake(t)
 	release := make(chan struct{})

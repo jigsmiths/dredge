@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/grafana/pyroscope-go"
 	"github.com/jigsmiths/dredge/internal/jobs"
 	"github.com/jigsmiths/dredge/internal/library"
 	"github.com/jigsmiths/dredge/internal/server"
@@ -19,6 +20,25 @@ func serve(ctx context.Context, e *env) error {
 	if fi, err := os.Stat(cfg.MusicDir); err != nil || !fi.IsDir() {
 		return fmt.Errorf("music dir %q does not exist; refusing to download somewhere that may not be the library", cfg.MusicDir)
 	}
+	if cfg.PyroscopeServerAddress != "" {
+		if p, err := pyroscope.Start(pyroscope.Config{
+			ApplicationName: "dredge",
+			ServerAddress:   cfg.PyroscopeServerAddress,
+			ProfileTypes: []pyroscope.ProfileType{
+				pyroscope.ProfileCPU,
+				pyroscope.ProfileAllocObjects,
+				pyroscope.ProfileAllocSpace,
+				pyroscope.ProfileInuseObjects,
+				pyroscope.ProfileInuseSpace,
+				pyroscope.ProfileGoroutines,
+			},
+		}); err != nil {
+			slog.Error("failed to start pyroscope", "err", err)
+		} else {
+			defer func() { _ = p.Stop() }()
+		}
+	}
+
 	d, err := e.open(cfg)
 	if err != nil {
 		return err

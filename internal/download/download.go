@@ -67,10 +67,11 @@ type Options struct {
 	Layout   library.Layout
 	Kind     library.Kind
 	Workers  int
-	Attempts int                       // tries per track; 3 if zero
-	Backoff  func(n int) time.Duration // wait before retry n; 3s times n if nil
-	Progress func(Result)              // called once per item, one at a time
-	Started  func(resolve.Item)        // called when a Need item begins, one at a time with Progress
+	Attempts int                                      // tries per track; 3 if zero
+	Backoff  func(n int) time.Duration                // wait before retry n; 3s times n if nil
+	Progress func(Result)                             // called once per item, one at a time
+	Started  func(resolve.Item)                       // called when a Need item begins, one at a time with Progress
+	Bytes    func(it resolve.Item, done, total int64) // bytes received so far; total is -1 if unknown. Called from several goroutines
 }
 
 func (o Options) attempts() int {
@@ -147,7 +148,11 @@ func one(ctx context.Context, it resolve.Item, src Source, rec Recorder, opt Opt
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fail("%w", err)
 	}
-	tmp, err := fetch(ctx, src, mono, filepath.Dir(dst), tagsFor(it, cover), opt)
+	fctx := ctx
+	if opt.Bytes != nil {
+		fctx = monochrome.WithProgress(ctx, func(done, total int64) { opt.Bytes(it, done, total) })
+	}
+	tmp, err := fetch(fctx, src, mono, filepath.Dir(dst), tagsFor(it, cover), opt)
 	if err != nil {
 		return fail("download: %w", err)
 	}
