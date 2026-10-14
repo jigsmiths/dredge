@@ -15,7 +15,6 @@ func TestNormTitle(t *testing.T) {
 		{"Beyoncé", "beyonce"},
 		{"Jamaican (Bam Bam)", "jamaican bam bam"},
 
-		// remaster and credit tags describe the release, not the recording
 		{"Crazy On You - 2004 Remaster", "crazy on you"},
 		{"Crazy On You - Remastered 2004", "crazy on you"},
 		{"Crazy On You (Remastered 2004)", "crazy on you"},
@@ -27,7 +26,6 @@ func TestNormTitle(t *testing.T) {
 		{"Song (with Someone)", "song"},
 		{"Song - feat. Someone", "song"},
 
-		// version tags change the recording and must survive
 		{"Barracuda (Live)", "barracuda live"},
 		{"Barracuda - Radio Edit", "barracuda radio edit"},
 		{"Barracuda (Acoustic)", "barracuda acoustic"},

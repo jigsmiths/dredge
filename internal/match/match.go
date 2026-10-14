@@ -9,17 +9,13 @@ import (
 )
 
 const (
-	// DurationToleranceMS is how far a candidate's length may be from the
-	// wanted one. Catalogues round and trim differently: Spotify and Deezer
-	// disagree by about 2.5s on the same recording.
+	// Spotify and Deezer disagree by about 2.5s on the same recording.
 	DurationToleranceMS = 3000
 
-	// TieMarginMS is how much closer in length a candidate must be to beat
-	// another recording outright.
+	// How much closer in length a recording must be to beat another outright.
 	TieMarginMS = 1000
 )
 
-// Candidate is a recording from a catalogue that carries ISRCs.
 type Candidate struct {
 	ISRC       string
 	Title      string
@@ -28,7 +24,6 @@ type Candidate struct {
 	DurationMS int
 }
 
-// Outcome says whether a single recording was found.
 type Outcome int
 
 const (
@@ -47,7 +42,6 @@ func (o Outcome) String() string {
 	return "no_match"
 }
 
-// Result is the outcome of Pick, with the reason for it.
 type Result struct {
 	Outcome Outcome
 	Best    Candidate // set when Matched
@@ -59,10 +53,8 @@ type scored struct {
 	dist int // distance in length from the wanted track
 }
 
-// Pick returns the one recording that is the wanted track, or says why it
-// cannot. It never guesses between different recordings: the exact ISRC is
-// what the download source is searched by, so a wrong one is a wasted miss at
-// best and the wrong song at worst.
+// Pick never guesses between different recordings: the download source is
+// searched by exact ISRC, so a wrong one fetches the wrong song or misses.
 func Pick(want track.Track, cands []Candidate) Result {
 	title := track.NormTitle(want.Title)
 	artists := track.NormArtists(want.Artists)
@@ -99,7 +91,7 @@ func Pick(want track.Track, cands []Candidate) Result {
 		return Result{Outcome: Matched, Best: best.c, Reason: fmt.Sprintf("closest length (%dms off)", best.dist)}
 	}
 
-	// Recordings that are about equally close: the album decides.
+	// about equally close in length: the album decides
 	album := track.NormTitle(want.Album)
 	if album != "" {
 		var byAlbum []scored
@@ -115,7 +107,6 @@ func Pick(want track.Track, cands []Candidate) Result {
 	return Result{Outcome: Ambiguous, Reason: fmt.Sprintf("%d different recordings fit equally well", len(rivals)+1)}
 }
 
-// distinctISRC returns the candidates whose ISRC differs from isrc.
 func distinctISRC(cs []scored, isrc string) []scored {
 	var out []scored
 	for _, s := range cs {

@@ -1,4 +1,4 @@
-// Package pool runs a function over a list with a bounded number of workers.
+// Package pool runs a function over a list with bounded concurrency.
 package pool
 
 import (
@@ -6,18 +6,15 @@ import (
 	"sync"
 )
 
-// DefaultWorkers is used when the caller does not choose.
 const DefaultWorkers = 4
 
-// Result is the outcome for one input.
 type Result[T any] struct {
 	Value T
 	Err   error
 }
 
-// Map calls fn for every item with at most workers running at once and
-// returns the results in input order. A failure only affects its own item.
-// Once ctx is done, items that have not started report its error.
+// Map returns results in input order. A failure only affects its own item;
+// once ctx is done, unstarted items report its error.
 func Map[In, Out any](ctx context.Context, workers int, in []In, fn func(context.Context, In) (Out, error)) []Result[Out] {
 	if workers <= 0 {
 		workers = DefaultWorkers

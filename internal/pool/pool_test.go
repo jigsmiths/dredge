@@ -11,7 +11,7 @@ import (
 func TestMapKeepsInputOrder(t *testing.T) {
 	in := []int{1, 2, 3, 4, 5, 6, 7, 8}
 	got := Map(context.Background(), 4, in, func(_ context.Context, n int) (int, error) {
-		// later items finish first, so order only holds if results are indexed
+		// later items finish first
 		time.Sleep(time.Duration(len(in)-n) * time.Millisecond)
 		return n * 10, nil
 	})
