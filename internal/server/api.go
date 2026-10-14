@@ -8,15 +8,18 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jigsmiths/dredge/internal/jobs"
 	"github.com/jigsmiths/dredge/internal/library"
+	"github.com/jigsmiths/dredge/internal/resolve"
 )
 
 type Options struct {
 	Jobs   *jobs.Manager
+	Search resolve.Searcher
 	Scan   func(context.Context) (library.ScanStats, error)
 	APIKey string // when set, /api needs it in X-Api-Key
 }
@@ -71,6 +74,7 @@ func (a *api) routes(r chi.Router) {
 		r.Post("/retry", a.retry)
 		r.Post("/cancel", a.cancel)
 	})
+	r.Get("/search", a.search)
 	r.Post("/scan", a.scan)
 }
 
@@ -85,13 +89,23 @@ func jobID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 
 func (a *api) submit(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		URL string `json:"url"`
+		URL     string   `json:"url"`
+		ISRC    string   `json:"isrc"`
+		Title   string   `json:"title"`
+		Artists []string `json:"artists"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil || body.URL == "" {
-		writeError(w, http.StatusBadRequest, `expected {"url": "<spotify link>"}`)
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil || (body.URL == "") == (body.ISRC == "") {
+		writeError(w, http.StatusBadRequest, `expected {"url": "<spotify link>"} or {"isrc", "title", "artists"}`)
 		return
 	}
-	j, created, err := a.Jobs.Submit(r.Context(), body.URL)
+	var j jobs.Job
+	var created bool
+	var err error
+	if body.URL != "" {
+		j, created, err = a.Jobs.Submit(r.Context(), body.URL)
+	} else {
+		j, created, err = a.Jobs.SubmitTrack(r.Context(), body.ISRC, body.Title, body.Artists)
+	}
 	if err != nil {
 		fail(w, err)
 		return
@@ -101,6 +115,39 @@ func (a *api) submit(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusAccepted
 	}
 	writeJSON(w, status, j)
+}
+
+const searchLimit = 15
+
+type hit struct {
+	ISRC       string   `json:"isrc"`
+	Title      string   `json:"title"`
+	Artists    []string `json:"artists"`
+	DurationMS int      `json:"duration_ms"`
+}
+
+// search lists the downloadable recordings for a free-text query, one per ISRC.
+func (a *api) search(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		writeError(w, http.StatusBadRequest, "q is required")
+		return
+	}
+	cands, err := a.Search.Search(r.Context(), q, searchLimit)
+	if err != nil {
+		slog.Error("search", "err", err)
+		writeError(w, http.StatusBadGateway, "the catalogue could not be searched")
+		return
+	}
+	out, seen := []hit{}, map[string]bool{}
+	for _, c := range cands {
+		if seen[c.ISRC] {
+			continue
+		}
+		seen[c.ISRC] = true
+		out = append(out, hit{c.ISRC, c.Title, c.Artists, c.DurationMS})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (a *api) list(w http.ResponseWriter, r *http.Request) {

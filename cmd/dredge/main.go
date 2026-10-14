@@ -27,6 +27,7 @@ const usage = `usage: dredge <command> [flags]
 
   resolve <spotify-link>  list what is in the library and what is needed
   get <spotify-link>      download what is needed
+  search <words>          find a track by name; --get N downloads result N
   scan                    index the music library
   serve                   run the HTTP server
   version
@@ -37,6 +38,7 @@ flags (resolve, get, scan):
   --workers N         parallel lookups and downloads (env WORKERS)
   --db PATH           index database (env DB_PATH)
   --attempts N        get: tries per track before giving up (default 3)
+  --get N             search: download result N
   --no-scan           resolve and get: do not refresh the index first`
 
 type fetcher interface {
@@ -47,6 +49,7 @@ type fetcher interface {
 type deps struct {
 	spotify fetcher
 	search  resolve.Searcher
+	details resolve.Detailer
 	source  download.Source
 	index   *library.Index
 	conn    *sql.DB
@@ -76,6 +79,7 @@ func openReal(cfg *config.Config) (*deps, error) {
 	return &deps{
 		spotify: spotify.New("", "", nil),
 		search:  mono,
+		details: mono,
 		source:  mono,
 		index:   library.NewIndex(conn),
 		conn:    conn,
@@ -92,6 +96,8 @@ func run(ctx context.Context, e *env, args []string) error {
 		return resolveCommand(ctx, e, args[1:])
 	case "get":
 		return getCommand(ctx, e, args[1:])
+	case "search":
+		return searchCommand(ctx, e, args[1:])
 	case "scan":
 		return scanCommand(ctx, e, args[1:])
 	case "serve":

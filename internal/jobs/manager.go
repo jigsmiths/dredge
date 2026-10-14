@@ -6,13 +6,17 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/jigsmiths/dredge/internal/download"
 	"github.com/jigsmiths/dredge/internal/library"
+	"github.com/jigsmiths/dredge/internal/monochrome"
 	"github.com/jigsmiths/dredge/internal/resolve"
 	"github.com/jigsmiths/dredge/internal/spotify"
+	"github.com/jigsmiths/dredge/internal/track"
 )
 
 // ErrInvalid is a link that cannot be queued.
@@ -33,6 +37,7 @@ type Deps struct {
 	Search   resolve.Searcher
 	Source   download.Source
 	Library  Library
+	Details  resolve.Detailer // optional: albums for tracks picked from search
 	Layout   library.Layout
 	Workers  int
 	Attempts int
@@ -64,7 +69,36 @@ func (m *Manager) Submit(ctx context.Context, link string) (Job, bool, error) {
 	if err != nil {
 		return Job{}, false, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
-	j, created, err := m.Create(ctx, "https://open.spotify.com/"+string(ref.Kind)+"/"+ref.ID)
+	j, created, err := m.Create(ctx, "https://open.spotify.com/"+string(ref.Kind)+"/"+ref.ID, nil)
+	if created {
+		m.poke()
+	}
+	return j, created, err
+}
+
+var isrcRe = regexp.MustCompile(`^[A-Z0-9]{12}$`)
+
+const pickedPrefix = "isrc:"
+
+// SubmitTrack queues one recording the user picked from search results.
+func (m *Manager) SubmitTrack(ctx context.Context, isrc, title string, artists []string) (Job, bool, error) {
+	isrc, title = strings.ToUpper(strings.TrimSpace(isrc)), strings.TrimSpace(title)
+	var names []string
+	for _, a := range artists {
+		if a = strings.TrimSpace(a); a != "" {
+			names = append(names, a)
+		}
+	}
+	switch {
+	case !isrcRe.MatchString(isrc):
+		return Job{}, false, fmt.Errorf("%w: %q is not an ISRC", ErrInvalid, isrc)
+	case title == "" || len(names) == 0:
+		return Job{}, false, fmt.Errorf("%w: a title and an artist are needed", ErrInvalid)
+	}
+	j, created, err := m.Create(ctx, pickedPrefix+isrc, &Seed{
+		Kind: "track", Name: names[0] + " - " + title,
+		Tracks: []Track{{Title: title, Artists: names, ISRC: isrc, Status: TrackPending}},
+	})
 	if created {
 		m.poke()
 	}
@@ -170,21 +204,53 @@ func (m *Manager) work(root context.Context, j Job) {
 
 func (m *Manager) process(ctx context.Context, j Job) error {
 	d, st := m.deps, m.Store
-	ref, err := spotify.ParseURL(j.URL)
-	if err != nil {
-		return err
-	}
 	if _, err := d.Library.Scan(ctx, d.Layout); err != nil {
 		return fmt.Errorf("scanning the library: %w", err)
 	}
-	col, err := d.Spotify.Fetch(ctx, ref)
-	if err != nil {
-		return err
+
+	var (
+		items []resolve.Item
+		kind  = library.Single
+		list  *spotify.Ref // set for a playlist, which also gets an M3U
+		name  string
+	)
+	if _, picked := strings.CutPrefix(j.URL, pickedPrefix); picked {
+		rows, err := st.Tracks(ctx, j.ID)
+		if err != nil {
+			return err
+		}
+		if len(rows) != 1 {
+			return errors.New("a picked track job has lost its track")
+		}
+		t, err := resolve.Enrich(ctx, track.Track{Title: rows[0].Title, Artists: rows[0].Artists, ISRC: rows[0].ISRC}, d.Details)
+		if err != nil && ctx.Err() == nil && !errors.Is(err, monochrome.ErrNotStocked) {
+			slog.Warn("no album details", "isrc", rows[0].ISRC, "err", err)
+		}
+		it, err := resolve.Direct(ctx, t, d.Library)
+		if err != nil {
+			return err
+		}
+		items = []resolve.Item{it}
+	} else {
+		ref, err := spotify.ParseURL(j.URL)
+		if err != nil {
+			return err
+		}
+		col, err := d.Spotify.Fetch(ctx, ref)
+		if err != nil {
+			return err
+		}
+		if err := st.SetCollection(ctx, j.ID, string(col.Kind), col.Name); err != nil {
+			return err
+		}
+		items = resolve.Resolve(ctx, col.Tracks, d.Library, d.Search, d.Workers)
+		if col.Kind == spotify.KindAlbum {
+			kind = library.Album
+		}
+		if col.Kind == spotify.KindPlaylist {
+			list, name = &ref, col.Name
+		}
 	}
-	if err := st.SetCollection(ctx, j.ID, string(col.Kind), col.Name); err != nil {
-		return err
-	}
-	items := resolve.Resolve(ctx, col.Tracks, d.Library, d.Search, d.Workers)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -204,10 +270,6 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 		return err
 	}
 
-	kind := library.Single
-	if col.Kind == spotify.KindAlbum {
-		kind = library.Album
-	}
 	set := func(pos int, status, path string, bytes int64, reason string) {
 		if path != "" {
 			path = m.rel(path)
@@ -238,9 +300,9 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 		},
 	})
 
-	if col.Kind == spotify.KindPlaylist {
+	if list != nil {
 		if paths := download.Placed(items, results); len(paths) > 0 {
-			if err := library.WriteM3U(d.Layout.PlaylistPath(col.Name, ref.ID), paths); err != nil {
+			if err := library.WriteM3U(d.Layout.PlaylistPath(name, list.ID), paths); err != nil {
 				return fmt.Errorf("writing playlist: %w", err)
 			}
 		}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, apiKey, Unauthorized, active, ago, type Job } from "./api";
+  import { api, apiKey, Unauthorized, active, ago, clock, isLink, type Hit, type Job } from "./api";
   import JobDetail from "./JobDetail.svelte";
 
   let jobs = $state<Job[]>([]);
@@ -8,6 +8,9 @@
   let needKey = $state(false);
   let keyInput = $state("");
   let selected = $state<number | null>(null);
+  let hits = $state<Hit[] | null>(null);
+  let searched = $state("");
+  let busy = $state(false);
 
   const fromHash = () => {
     const m = location.hash.match(/^#\/jobs\/(\d+)$/);
@@ -36,17 +39,46 @@
     };
   });
 
-  async function submit(e: SubmitEvent) {
+  function fail(e: unknown) {
+    if (e instanceof Unauthorized) needKey = true;
+    else error = (e as Error).message;
+  }
+
+  // A link starts a download; anything else searches, and the user picks.
+  async function go(e: SubmitEvent) {
     e.preventDefault();
+    const text = link.trim();
+    busy = true;
     try {
-      const j = await api.submit(link.trim());
+      if (isLink(text)) {
+        const j = await api.submit(text);
+        link = "";
+        hits = null;
+        error = "";
+        await refresh();
+        location.hash = `#/jobs/${j.id}`;
+      } else {
+        hits = await api.search(text);
+        searched = text;
+        error = "";
+      }
+    } catch (e) {
+      fail(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function pick(h: Hit) {
+    try {
+      const j = await api.submitTrack(h);
       link = "";
+      hits = null;
       error = "";
       await refresh();
       location.hash = `#/jobs/${j.id}`;
     } catch (e) {
-      if (e instanceof Unauthorized) needKey = true;
-      else error = (e as Error).message;
+      fail(e);
     }
   }
 
@@ -81,11 +113,24 @@
   {#if selected !== null}
     <JobDetail id={selected} />
   {:else}
-    <form class="row" onsubmit={submit}>
-      <input placeholder="Spotify playlist, album or track link" bind:value={link} required />
-      <button>Download</button>
+    <form class="row" onsubmit={go}>
+      <input placeholder="Search for a song, or paste a Spotify link" bind:value={link} required />
+      <button disabled={busy}>{isLink(link) ? "Download" : "Search"}</button>
     </form>
     {#if error}<p class="error">{error}</p>{/if}
+
+    {#if hits}
+      <h2>Results for "{searched}"</h2>
+      {#each hits as h (h.isrc)}
+        <div class="hit">
+          <span class="name">{h.title}</span>
+          <span class="muted">{h.artists.join(", ")} · {clock(h.duration_ms)}</span>
+          <button onclick={() => pick(h)}>Download</button>
+        </div>
+      {:else}
+        <p class="muted">Nothing downloadable found.</p>
+      {/each}
+    {/if}
 
     <h2>Now</h2>
     {#each current as j (j.id)}
@@ -155,6 +200,22 @@
     border: 0;
     border-radius: 6px;
     cursor: pointer;
+  }
+  .hit {
+    display: grid;
+    grid-template-columns: 1.6fr 1.4fr auto;
+    gap: 0.8rem;
+    align-items: center;
+    padding: 0.5rem 0.8rem;
+    margin-bottom: 0.3rem;
+    background: #1b1b1b;
+    border-radius: 6px;
+  }
+  .hit .muted {
+    grid-column: auto;
+  }
+  .hit button {
+    padding: 0.3rem 0.8rem;
   }
   .job {
     display: grid;

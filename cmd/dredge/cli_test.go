@@ -17,6 +17,7 @@ import (
 	"github.com/jigsmiths/dredge/internal/library"
 	"github.com/jigsmiths/dredge/internal/match"
 	"github.com/jigsmiths/dredge/internal/monochrome"
+	"github.com/jigsmiths/dredge/internal/resolve"
 	"github.com/jigsmiths/dredge/internal/spotify"
 	"github.com/jigsmiths/dredge/internal/track"
 )
@@ -81,14 +82,15 @@ func (s *fakeSource) Download(ctx context.Context, t monochrome.Track, w io.Writ
 func (s *fakeSource) Artwork(context.Context, monochrome.Track) ([]byte, error) { return nil, nil }
 
 type rig struct {
-	t      *testing.T
-	root   string
-	spot   *fakeSpotify
-	search *fakeSearch
-	src    *fakeSource
-	out    bytes.Buffer
-	errw   bytes.Buffer
-	e      *env
+	t       *testing.T
+	root    string
+	spot    *fakeSpotify
+	search  *fakeSearch
+	src     *fakeSource
+	details resolve.Detailer
+	out     bytes.Buffer
+	errw    bytes.Buffer
+	e       *env
 }
 
 func cand(isrc, title, artist string, ms int) match.Candidate {
@@ -125,7 +127,7 @@ func newRig(t *testing.T) *rig {
 		out: &r.out, err: &r.errw,
 		cfg: &config.Config{MusicDir: r.root, SinglesDir: "Singles", Workers: 2, DBPath: "unused"},
 		open: func(*config.Config) (*deps, error) {
-			return &deps{spotify: r.spot, search: r.search, source: r.src, index: idx, close: func() {}}, nil
+			return &deps{spotify: r.spot, search: r.search, source: r.src, details: r.details, index: idx, close: func() {}}, nil
 		},
 	}
 	return r
