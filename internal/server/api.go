@@ -174,6 +174,7 @@ func (a *api) get(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	a.Jobs.Live(id, ts)
 	writeJSON(w, http.StatusOK, struct {
 		jobs.Job
 		Tracks []jobs.Track `json:"tracks"`

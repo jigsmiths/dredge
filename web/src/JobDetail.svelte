@@ -39,6 +39,19 @@
     }
   }
 
+  let copied = $state(false);
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(job!.url);
+      copied = true;
+      setTimeout(() => (copied = false), 1500);
+    } catch {
+      error = "Could not copy the link";
+    }
+  }
+
+  const pct = (t: Track) => (t.bytes_total ? Math.min(100, Math.round(((t.bytes_done ?? 0) / t.bytes_total) * 100)) : 0);
+
   const by = (ts: Track[], ...st: string[]) => ts.filter((t) => st.includes(t.status));
   const who = (t: Track) => t.artists.join(", ");
   const why: Record<string, string> = {
@@ -60,6 +73,9 @@
   {#if job.error}<p class="error">{job.error}</p>{/if}
 
   <div class="actions">
+    {#if job.url.startsWith("http")}
+      <button class="quiet" onclick={copyLink}>{copied ? "Copied" : "Copy link"}</button>
+    {/if}
     {#if active(job)}
       <button onclick={() => act(api.cancel)}>Cancel</button>
     {:else}
@@ -80,7 +96,18 @@
   {#if now.length}
     <h2>Downloading ({now.length})</h2>
     {#each now as t (t.pos)}
-      <div class="t"><span>{t.title}</span><span class="muted">{who(t)}</span></div>
+      <div class="t">
+        <span>{t.title}</span>
+        <span class="muted">{who(t)}</span>
+        <span class="bar">
+          {#if t.bytes_total}
+            <progress max={t.bytes_total} value={t.bytes_done ?? 0}></progress>
+            <span class="muted">{pct(t)}%</span>
+          {:else if t.bytes_done}
+            <span class="muted">{size(t.bytes_done)}</span>
+          {/if}
+        </span>
+      </div>
     {/each}
   {/if}
 
@@ -162,6 +189,16 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .t .bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .bar progress {
+    flex: 1;
+    min-width: 0;
+    height: 6px;
   }
   .muted {
     color: #9a9a9a;

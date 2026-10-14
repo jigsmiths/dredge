@@ -56,6 +56,23 @@ type Manager struct {
 	current int64
 	stop    context.CancelFunc
 	byUser  bool
+	live    map[int]progress // by track position, for the current job
+}
+
+type progress struct{ done, total int64 }
+
+// Live adds the bytes received so far to the downloading tracks of the job.
+func (m *Manager) Live(id int64, ts []Track) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.current != id {
+		return
+	}
+	for i := range ts {
+		if p, ok := m.live[ts[i].Pos]; ok && ts[i].Status == TrackDownloading {
+			ts[i].BytesDone, ts[i].BytesTotal = p.done, max(p.total, 0)
+		}
+	}
 }
 
 func NewManager(s *Store, d Deps) *Manager {
@@ -169,7 +186,7 @@ func (m *Manager) Run(ctx context.Context) error {
 func (m *Manager) work(root context.Context, j Job) {
 	ctx, cancel := context.WithCancel(root)
 	m.mu.Lock()
-	m.current, m.stop, m.byUser = j.ID, cancel, false
+	m.current, m.stop, m.byUser, m.live = j.ID, cancel, false, map[int]progress{}
 	m.mu.Unlock()
 	defer func() {
 		cancel()
@@ -281,6 +298,11 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 	results := download.Run(ctx, items, d.Source, d.Library, download.Options{
 		Layout: d.Layout, Kind: kind, Workers: d.Workers, Attempts: d.Attempts, Backoff: d.Backoff,
 		Started: func(it resolve.Item) { set(posByISRC[it.Track.ISRC], TrackDownloading, "", 0, "") },
+		Bytes: func(it resolve.Item, done, total int64) {
+			m.mu.Lock()
+			m.live[posByISRC[it.Track.ISRC]] = progress{done, total}
+			m.mu.Unlock()
+		},
 		Progress: func(r download.Result) {
 			if r.Item.Status != resolve.Need {
 				return

@@ -65,6 +65,10 @@ type Track struct {
 	Path    string   `json:"path,omitempty"` // relative to the library root
 	Bytes   int64    `json:"bytes,omitempty"`
 	Reason  string   `json:"reason,omitempty"`
+
+	// live while downloading; never stored
+	BytesDone  int64 `json:"bytes_done,omitempty"`
+	BytesTotal int64 `json:"bytes_total,omitempty"`
 }
 
 type Store struct{ db *sql.DB }

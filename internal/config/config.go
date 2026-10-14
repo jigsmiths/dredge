@@ -15,6 +15,8 @@ type Config struct {
 	SinglesDir string // DREDGE_SINGLES_DIR, relative to MusicDir; "-" files singles straight under it
 	Workers    int    // WORKERS
 	APIKey     string // DREDGE_API_KEY; when set, /api needs it in X-Api-Key
+
+	PyroscopeServerAddress string // PYROSCOPE_SERVER_ADDRESS; profiling is off when empty
 }
 
 func Load() *Config {
@@ -25,6 +27,8 @@ func Load() *Config {
 		SinglesDir: getEnv("DREDGE_SINGLES_DIR", "Singles"),
 		Workers:    defaultWorkers,
 		APIKey:     os.Getenv("DREDGE_API_KEY"),
+
+		PyroscopeServerAddress: os.Getenv("PYROSCOPE_SERVER_ADDRESS"),
 	}
 	if c.SinglesDir == "-" {
 		c.SinglesDir = ""
