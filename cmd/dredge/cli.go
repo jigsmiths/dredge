@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -246,7 +247,12 @@ func (s *session) get(ctx context.Context, e *env) error {
 	}
 
 	counts := map[download.Outcome]int{}
+	var interrupted int
 	for _, r := range results {
+		if r.Outcome == download.Failed && stopped(r.Err) {
+			interrupted++
+			continue
+		}
 		counts[r.Outcome]++
 	}
 	failed := counts[download.Failed]
@@ -270,11 +276,17 @@ func (s *session) get(ctx context.Context, e *env) error {
 	if len(parts) > 0 {
 		say(e.out, "%s\n", strings.Join(parts, ", "))
 	}
+	if interrupted > 0 {
+		say(e.out, "interrupted: %s not downloaded\n", plural(interrupted, "track"))
+	}
 
 	if s.col.Kind == spotify.KindPlaylist {
 		if err := s.writePlaylist(e, results); err != nil {
 			return err
 		}
+	}
+	if interrupted > 0 {
+		return errors.New("interrupted")
 	}
 	if failed > 0 {
 		return fmt.Errorf("%s failed", plural(failed, "track"))
@@ -292,6 +304,9 @@ func progress(e *env, s *session, r download.Result) {
 	case download.NotStocked:
 		what = "not on Monochrome"
 	case download.Failed:
+		if stopped(r.Err) {
+			return // reported once as an interruption
+		}
 		what = "failed"
 		if r.Err != nil {
 			detail = "  (" + r.Err.Error() + ")"
@@ -300,6 +315,11 @@ func progress(e *env, s *session, r download.Result) {
 		return
 	}
 	say(e.out, "%-18s %s%s\n", what, display(r.Item), detail)
+}
+
+// stopped is true for a download that ended because the run was cancelled.
+func stopped(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func size(n int64) string {

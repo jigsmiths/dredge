@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jigsmiths/dredge/internal/config"
 	"github.com/jigsmiths/dredge/internal/db"
@@ -52,6 +53,7 @@ func (s *fakeSearch) Search(_ context.Context, q string, _ int) ([]match.Candida
 type fakeSource struct {
 	stocked map[string]bool
 	failFor map[string]error
+	stall   bool // downloads wait until the context ends
 }
 
 func (s *fakeSource) Find(_ context.Context, isrc, _, title string) (monochrome.Track, error) {
@@ -61,7 +63,11 @@ func (s *fakeSource) Find(_ context.Context, isrc, _, title string) (monochrome.
 	return monochrome.Track{ID: isrc, ISRC: isrc, Title: title}, nil
 }
 
-func (s *fakeSource) Download(_ context.Context, t monochrome.Track, w io.Writer) (int64, error) {
+func (s *fakeSource) Download(ctx context.Context, t monochrome.Track, w io.Writer) (int64, error) {
+	if s.stall {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}
 	if err := s.failFor[t.ISRC]; err != nil {
 		return 0, err
 	}
@@ -126,9 +132,13 @@ func newRig(t *testing.T) *rig {
 }
 
 func (r *rig) run(args ...string) error {
+	return r.runCtx(context.Background(), args...)
+}
+
+func (r *rig) runCtx(ctx context.Context, args ...string) error {
 	r.out.Reset()
 	r.errw.Reset()
-	return run(context.Background(), r.e, args)
+	return run(ctx, r.e, args)
 }
 
 // have puts a tagged FLAC in the library, as an earlier download would.
@@ -150,6 +160,8 @@ func (r *rig) have(rel string, tags flacmeta.Tags) string {
 	}
 	return p
 }
+
+func (r *rig) cfgWorkers(n int) { r.e.cfg.Workers = n }
 
 func (r *rig) exists(rel string) bool {
 	_, err := os.Stat(filepath.Join(r.root, filepath.FromSlash(rel)))
@@ -269,6 +281,33 @@ func TestGetReportsFailuresButFinishesTheRest(t *testing.T) {
 	}
 	if !strings.Contains(r.out.String(), "failed") || !strings.Contains(r.out.String(), "connection reset") {
 		t.Errorf("output does not say what failed:\n%s", r.out.String())
+	}
+	if matches, _ := filepath.Glob(filepath.Join(r.root, "Singles", ".dredge-*")); len(matches) != 0 {
+		t.Errorf("temp files left behind: %v", matches)
+	}
+}
+
+func TestInterruptingGetReportsItOnceInsteadOfFailingEveryTrack(t *testing.T) {
+	r := newRig(t)
+	r.cfgWorkers(1)
+	r.search.results["Muse uprising"] = []match.Candidate{cand("GBAHT0900123", "Uprising", "Muse", 305000)}
+	r.src.stocked["GBAHT0900123"] = true
+	r.src.stall = true
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	err := r.runCtx(ctx, "get", link("playlist", playlistID))
+	if err == nil || !strings.Contains(err.Error(), "interrupted") {
+		t.Fatalf("err = %v, want one saying the run was interrupted", err)
+	}
+	out := r.out.String()
+	if strings.Contains(out, "context canceled") || strings.Contains(out, "failed ") {
+		t.Errorf("an interruption was reported as failures:\n%s", out)
+	}
+	if !strings.Contains(out, "interrupted") {
+		t.Errorf("output does not say it was interrupted:\n%s", out)
 	}
 	if matches, _ := filepath.Glob(filepath.Join(r.root, "Singles", ".dredge-*")); len(matches) != 0 {
 		t.Errorf("temp files left behind: %v", matches)
