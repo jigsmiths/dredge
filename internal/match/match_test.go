@@ -83,22 +83,44 @@ func TestPick(t *testing.T) {
 			wantISRC: "AAAA00000001",
 		},
 		{
-			name: "two ISRCs of equal length are not guessed between",
+			name: "two ISRCs of equal length are one recording, the lower ISRC wins",
 			want: barracuda,
 			cands: []Candidate{
-				cand("AAAA00000001", "Barracuda", "Heart", 262000),
 				cand("BBBB00000002", "Barracuda", "Heart", 262000),
+				cand("AAAA00000001", "Barracuda", "Heart", 262000),
 			},
-			outcome: Ambiguous,
+			outcome:  Matched,
+			wantISRC: "AAAA00000001",
 		},
 		{
-			name: "two near-equal ISRCs inside the margin are not guessed between",
+			name: "two near-equal ISRCs inside the margin are one recording, the closer wins",
 			want: barracuda,
 			cands: []Candidate{
 				cand("AAAA00000001", "Barracuda", "Heart", 262400),
 				cand("BBBB00000002", "Barracuda", "Heart", 261900),
 			},
-			outcome: Ambiguous,
+			outcome:  Matched,
+			wantISRC: "BBBB00000002",
+		},
+		{
+			name: "a plain wanted track with only remastered candidates takes the closest",
+			want: track.Track{Title: "Edge of Seventeen", Artists: []string{"Stevie Nicks"}, DurationMS: 329680},
+			cands: []Candidate{
+				cand("USRH11900785", "Edge of Seventeen - 2016 Remaster", "Stevie Nicks", 329413),
+				cand("USRH11604198", "Edge of Seventeen - 2016 Remaster", "Stevie Nicks", 329413),
+			},
+			outcome:  Matched,
+			wantISRC: "USRH11604198",
+		},
+		{
+			name: "a length far off the plain release leaves the remaster as the only fit",
+			want: track.Track{Title: "Edge of Seventeen", Artists: []string{"Stevie Nicks"}, DurationMS: 329680},
+			cands: []Candidate{
+				cand("USRH11604576", "Edge of Seventeen", "Stevie Nicks", 400840),
+				cand("USRH11604198", "Edge of Seventeen - 2016 Remaster", "Stevie Nicks", 329413),
+			},
+			outcome:  Matched,
+			wantISRC: "USRH11604198",
 		},
 		{
 			name: "a remastered wanted track prefers the remastered release",
@@ -121,13 +143,14 @@ func TestPick(t *testing.T) {
 			wantISRC: "AAAA00000001",
 		},
 		{
-			name: "two equally good remasters are not guessed between",
+			name: "two equally good remasters are one recording, the lower ISRC wins",
 			want: track.Track{Title: "Song - Remastered", Artists: []string{"A"}, DurationMS: 200000},
 			cands: []Candidate{
-				cand("AAAA00000001", "Song (Remastered 2001)", "A", 200500),
 				cand("BBBB00000002", "Song (Remastered 2011)", "A", 200500),
+				cand("AAAA00000001", "Song (Remastered 2001)", "A", 200500),
 			},
-			outcome: Ambiguous,
+			outcome:  Matched,
+			wantISRC: "AAAA00000001",
 		},
 		{
 			name: "same ISRC listed twice is one recording",
