@@ -60,7 +60,7 @@ Files are written 0644 in 0755 folders. Run as the user that owns the library (u
 
 Job statuses are `queued`, `resolving`, `running`, `done`, `failed` (the link could not be fetched) and `cancelled`. Track statuses are `pending`, `downloading`, `done`, `have`, `duplicate`, `not_stocked`, `lossy_only` (Monochrome only has it as AAC), `no_match`, `ambiguous` and `failed`. A `done` job can still hold tracks that were not fetched; the counts say how many.
 
-With `DREDGE_API_KEY` set, send `X-Api-Key` on `/api` calls; the web page asks for it once. `/health` and the page itself stay open. `serve` refuses to start if the music dir does not exist.
+With `DREDGE_API_KEY` set, send `X-Api-Key` on `/api` calls; the web page asks for it once. `/health` and the page itself stay open. Without a key every `/api` route is open, so keep dredge behind your own auth or on a private network. `serve` refuses to start if the music dir does not exist.
 
 ## How it works
 

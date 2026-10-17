@@ -3,10 +3,8 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/grafana/pyroscope-go"
@@ -15,29 +13,37 @@ import (
 	"github.com/jigsmiths/dredge/internal/server"
 )
 
+// startProfiling sends profiles to a Pyroscope server, if there is one, and
+// returns the function that stops it.
+func startProfiling(addr string) func() {
+	if addr == "" {
+		return func() {}
+	}
+	p, err := pyroscope.Start(pyroscope.Config{
+		ApplicationName: "dredge",
+		ServerAddress:   addr,
+		ProfileTypes: []pyroscope.ProfileType{
+			pyroscope.ProfileCPU,
+			pyroscope.ProfileAllocObjects,
+			pyroscope.ProfileAllocSpace,
+			pyroscope.ProfileInuseObjects,
+			pyroscope.ProfileInuseSpace,
+			pyroscope.ProfileGoroutines,
+		},
+	})
+	if err != nil {
+		slog.Error("failed to start pyroscope", "err", err)
+		return func() {}
+	}
+	return func() { _ = p.Stop() }
+}
+
 func serve(ctx context.Context, e *env) error {
 	cfg := e.cfg
-	if fi, err := os.Stat(cfg.MusicDir); err != nil || !fi.IsDir() {
-		return fmt.Errorf("music dir %q does not exist; refusing to download somewhere that may not be the library", cfg.MusicDir)
+	if err := requireMusicDir(cfg.MusicDir); err != nil {
+		return err
 	}
-	if cfg.PyroscopeServerAddress != "" {
-		if p, err := pyroscope.Start(pyroscope.Config{
-			ApplicationName: "dredge",
-			ServerAddress:   cfg.PyroscopeServerAddress,
-			ProfileTypes: []pyroscope.ProfileType{
-				pyroscope.ProfileCPU,
-				pyroscope.ProfileAllocObjects,
-				pyroscope.ProfileAllocSpace,
-				pyroscope.ProfileInuseObjects,
-				pyroscope.ProfileInuseSpace,
-				pyroscope.ProfileGoroutines,
-			},
-		}); err != nil {
-			slog.Error("failed to start pyroscope", "err", err)
-		} else {
-			defer func() { _ = p.Stop() }()
-		}
-	}
+	defer startProfiling(cfg.PyroscopeServerAddress)()
 
 	d, err := e.open(cfg)
 	if err != nil {

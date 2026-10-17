@@ -50,11 +50,11 @@ func (s *fakeSearch) Search(_ context.Context, q string, _ int) ([]match.Candida
 }
 
 func tr(title, artist string, ms int) track.Track {
-	return track.Track{Title: title, Artists: []string{artist}, Album: "Album", DurationMS: ms}
+	return track.Track{Title: title, Artists: []string{artist}, DurationMS: ms}
 }
 
 func cand(isrc, title, artist string, ms int) match.Candidate {
-	return match.Candidate{ISRC: isrc, Title: title, Artists: []string{artist}, Album: "Album", DurationMS: ms}
+	return match.Candidate{ISRC: isrc, Title: title, Artists: []string{artist}, DurationMS: ms}
 }
 
 func TestNeedWhenMatchedAndNotInTheLibrary(t *testing.T) {
@@ -64,6 +64,16 @@ func TestNeedWhenMatchedAndNotInTheLibrary(t *testing.T) {
 	got := Resolve(context.Background(), []track.Track{tr("Barracuda", "Heart", 261495)}, &fakeLib{}, s, 4)
 	if len(got) != 1 || got[0].Status != Need || got[0].Track.ISRC != "USSM10009075" {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestNeedCarriesTheCataloguesTrackSoDownloadNeedNotSearchAgain(t *testing.T) {
+	c := cand("USSM10009075", "Barracuda", "Heart", 264000)
+	c.ID = "11"
+	s := &fakeSearch{results: map[string][]match.Candidate{"Heart barracuda": {c}}}
+	got := Resolve(context.Background(), []track.Track{tr("Barracuda", "Heart", 261495)}, &fakeLib{}, s, 4)
+	if got[0].Status != Need || got[0].Found == nil || got[0].Found.ID != "11" || got[0].Found.ISRC != "USSM10009075" {
+		t.Fatalf("got %+v", got[0])
 	}
 }
 

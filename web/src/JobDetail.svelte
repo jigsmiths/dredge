@@ -42,7 +42,7 @@
   let copied = $state(false);
   async function copyLink() {
     try {
-      await navigator.clipboard.writeText(job!.url);
+      await navigator.clipboard.writeText(job?.url ?? "");
       copied = true;
       setTimeout(() => (copied = false), 1500);
     } catch {

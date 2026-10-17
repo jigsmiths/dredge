@@ -125,6 +125,20 @@ func files(t *testing.T, root string) []string {
 	return out
 }
 
+func TestAFoundTrackIsDownloadedWithoutSearchingAgain(t *testing.T) {
+	opt, root := setup(t)
+	src := &fakeSource{findErr: errors.New("Find must not be called")}
+	it := need("USSM10009075", "Barracuda", "Heart")
+	it.Found = &monochrome.Track{ID: "11", ISRC: "USSM10009075", Title: "Barracuda"}
+	res := Run(context.Background(), []resolve.Item{it}, src, &fakeRecorder{}, opt)
+	if res[0].Outcome != Downloaded || res[0].Err != nil {
+		t.Fatalf("result = %+v", res[0])
+	}
+	if got := files(t, root); len(got) != 1 {
+		t.Errorf("files = %v", got)
+	}
+}
+
 func TestDownloadsTagsAndFilesATrack(t *testing.T) {
 	opt, root := setup(t)
 	src := &fakeSource{stocked: map[string]bool{"USSM10009075": true}, art: []byte("\xff\xd8\xffjpeg")}

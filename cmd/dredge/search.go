@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/jigsmiths/dredge/internal/match"
@@ -35,7 +34,7 @@ func searchCommand(ctx context.Context, e *env, args []string) error {
 	if err != nil {
 		return err
 	}
-	hits := distinct(cands)
+	hits := match.Distinct(cands)
 	if len(hits) == 0 {
 		say(e.out, "no downloadable matches\n")
 		return nil
@@ -51,8 +50,8 @@ func searchCommand(ctx context.Context, e *env, args []string) error {
 		return usageError{fmt.Sprintf("--get %d is not in the list of %d", o.pick, len(hits))}
 	}
 
-	if fi, err := os.Stat(o.cfg.MusicDir); err != nil || !fi.IsDir() {
-		return fmt.Errorf("music dir %q does not exist; refusing to download somewhere that may not be the library", o.cfg.MusicDir)
+	if err := requireMusicDir(o.cfg.MusicDir); err != nil {
+		return err
 	}
 	if !o.noScan {
 		if err := scanLibrary(ctx, e, d, o); err != nil {
@@ -75,19 +74,6 @@ func searchCommand(ctx context.Context, e *env, args []string) error {
 	}
 	s.list(e)
 	return s.get(ctx, e)
-}
-
-// distinct drops repeats of a recording, which the catalogue lists once per release.
-func distinct(cands []match.Candidate) []match.Candidate {
-	seen := map[string]bool{}
-	var out []match.Candidate
-	for _, c := range cands {
-		if !seen[c.ISRC] {
-			seen[c.ISRC] = true
-			out = append(out, c)
-		}
-	}
-	return out
 }
 
 func clock(ms int) string { return fmt.Sprintf("%d:%02d", ms/60000, ms/1000%60) }

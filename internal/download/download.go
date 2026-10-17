@@ -66,7 +66,7 @@ type Result struct {
 	Err     error
 }
 
-const defaultAttempts = 3
+const DefaultAttempts = 3
 
 type Options struct {
 	Layout   library.Layout
@@ -81,7 +81,7 @@ type Options struct {
 
 func (o Options) attempts() int {
 	if o.Attempts < 1 {
-		return defaultAttempts
+		return DefaultAttempts
 	}
 	return o.Attempts
 }
@@ -105,13 +105,13 @@ func Run(ctx context.Context, items []resolve.Item, src Source, rec Recorder, op
 		}
 	}
 	res := pool.Map(ctx, opt.Workers, items, func(ctx context.Context, it resolve.Item) (Result, error) {
-		if opt.Started != nil && it.Status == resolve.Need {
-			progress.Lock()
-			opt.Started(it)
-			progress.Unlock()
-		}
 		if it.Status == resolve.Need {
 			slog.Info("track started", "title", it.Track.Title, "artist", firstArtist(it.Track))
+			if opt.Started != nil {
+				progress.Lock()
+				opt.Started(it)
+				progress.Unlock()
+			}
 		}
 		began := time.Now()
 		r := one(ctx, it, src, rec, opt, &place)
@@ -172,16 +172,18 @@ func one(ctx context.Context, it resolve.Item, src Source, rec Recorder, opt Opt
 	if exists(dst) {
 		return Result{Item: it, Outcome: Exists, Path: dst}
 	}
-	var artist string
-	if len(it.Track.Artists) > 0 {
-		artist = it.Track.Artists[0]
-	}
-	mono, err := src.Find(ctx, it.Track.ISRC, artist, it.Track.Title)
-	if errors.Is(err, monochrome.ErrNotStocked) {
-		return Result{Item: it, Outcome: NotStocked}
-	}
-	if err != nil {
-		return fail("find: %w", err)
+	var mono monochrome.Track
+	if it.Found != nil {
+		mono = *it.Found
+	} else {
+		var err error
+		mono, err = src.Find(ctx, it.Track.ISRC, firstArtist(it.Track), it.Track.Title)
+		if errors.Is(err, monochrome.ErrNotStocked) {
+			return Result{Item: it, Outcome: NotStocked}
+		}
+		if err != nil {
+			return fail("find: %w", err)
+		}
 	}
 	cover, _ := src.Artwork(ctx, mono) // a missing cover is not worth failing for
 

@@ -72,6 +72,15 @@ func (l Layout) Path(kind Kind, t track.Track) string {
 		safe(artist, "Unknown Artist"), safe(t.Album, "Unknown Album"), safe(name, "Unknown Title")+".flac")
 }
 
+// Rel is path relative to the library root with forward slashes, or path
+// itself when it is not under the root.
+func (l Layout) Rel(path string) string {
+	if r, err := filepath.Rel(l.Root, path); err == nil {
+		return filepath.ToSlash(r)
+	}
+	return path
+}
+
 // PlaylistPath names playlist files the way MusicGrabber does, so a playlist
 // it already wrote is the same file.
 func (l Layout) PlaylistPath(name, id string) string {
@@ -267,7 +276,7 @@ func (l Layout) fromPath(path string) (Entry, bool) {
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	if l.SinglesDir != "" {
-		if len(parts) < 1 || parts[0] != l.SinglesDir {
+		if parts[0] != l.SinglesDir {
 			return Entry{}, false
 		}
 		parts = parts[1:]
@@ -282,6 +291,25 @@ func (l Layout) fromPath(path string) (Entry, bool) {
 	return Entry{Path: path, Title: title, Artists: []string{parts[0]}}, true
 }
 
+// stamps returns what the index holds for the files under prefix.
+func (x *Index) stamps(ctx context.Context, prefix string) (map[string]stamp, error) {
+	rows, err := x.db.QueryContext(ctx, `SELECT path, mtime, size FROM library WHERE substr(path, 1, ?) = ?`, len(prefix), prefix)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	known := map[string]stamp{}
+	for rows.Next() {
+		var p string
+		var s stamp
+		if err := rows.Scan(&p, &s.mtime, &s.size); err != nil {
+			return nil, err
+		}
+		known[p] = s
+	}
+	return known, rows.Err()
+}
+
 // Scan brings the index in line with the files under the library root. Files
 // whose size and modification time are unchanged are not read again.
 func (x *Index) Scan(ctx context.Context, l Layout) (ScanStats, error) {
@@ -292,24 +320,10 @@ func (x *Index) Scan(ctx context.Context, l Layout) (ScanStats, error) {
 	}
 	prefix := strings.TrimRight(root, string(filepath.Separator)) + string(filepath.Separator)
 
-	known := map[string]stamp{}
-	rows, err := x.db.QueryContext(ctx, `SELECT path, mtime, size FROM library WHERE substr(path, 1, ?) = ?`, len(prefix), prefix)
+	known, err := x.stamps(ctx, prefix)
 	if err != nil {
 		return st, err
 	}
-	for rows.Next() {
-		var p string
-		var s stamp
-		if err := rows.Scan(&p, &s.mtime, &s.size); err != nil {
-			_ = rows.Close()
-			return st, err
-		}
-		known[p] = s
-	}
-	if err := rows.Err(); err != nil {
-		return st, err
-	}
-	_ = rows.Close()
 
 	seen := map[string]bool{}
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {

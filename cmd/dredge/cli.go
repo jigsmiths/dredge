@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/jigsmiths/dredge/internal/config"
@@ -35,7 +34,7 @@ func parseFlags(name string, e *env, args []string) (*options, error) {
 	fs.IntVar(&o.cfg.Workers, "workers", o.cfg.Workers, "")
 	fs.StringVar(&o.cfg.DBPath, "db", o.cfg.DBPath, "")
 	fs.BoolVar(&o.noScan, "no-scan", false, "")
-	fs.IntVar(&o.attempts, "attempts", 3, "")
+	fs.IntVar(&o.attempts, "attempts", download.DefaultAttempts, "")
 	fs.IntVar(&o.pick, "get", 0, "")
 	for {
 		if err := fs.Parse(args); err != nil {
@@ -72,6 +71,14 @@ func (o *options) link() (spotify.Ref, error) {
 		return spotify.ParseURL(o.args[0])
 	}
 	return spotify.Ref{}, usageError{fmt.Sprintf("expected one link, got %d", len(o.args))}
+}
+
+// requireMusicDir refuses to download somewhere that may not be the library.
+func requireMusicDir(dir string) error {
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return fmt.Errorf("music dir %q does not exist; refusing to download somewhere that may not be the library", dir)
+	}
+	return nil
 }
 
 // say writes to the terminal; a failed write has nothing useful to do.
@@ -153,8 +160,8 @@ func prepare(ctx context.Context, e *env, command string, args []string) (*sessi
 		return nil, nil, err
 	}
 	if command == "get" {
-		if fi, err := os.Stat(o.cfg.MusicDir); err != nil || !fi.IsDir() {
-			return nil, nil, fmt.Errorf("music dir %q does not exist; refusing to download somewhere that may not be the library", o.cfg.MusicDir)
+		if err := requireMusicDir(o.cfg.MusicDir); err != nil {
+			return nil, nil, err
 		}
 	}
 	d, err := e.open(&o.cfg)
@@ -187,13 +194,6 @@ func display(it resolve.Item) string {
 	return artist + " - " + it.Track.Title
 }
 
-func (s *session) rel(path string) string {
-	if r, err := filepath.Rel(s.layout.Root, path); err == nil {
-		return filepath.ToSlash(r)
-	}
-	return path
-}
-
 func (s *session) list(e *env) {
 	say(e.out, "%s (%s, %s)\n", s.col.Name, s.col.Kind, plural(len(s.col.Tracks), "track"))
 	if s.col.Skipped > 0 {
@@ -207,7 +207,7 @@ func (s *session) list(e *env) {
 		case resolve.Need:
 			detail = "  [" + it.Track.ISRC + "]"
 		case resolve.Have:
-			detail = "  (" + s.rel(it.Path) + ")"
+			detail = "  (" + s.layout.Rel(it.Path) + ")"
 		default:
 			if it.Reason != "" {
 				detail = "  (" + it.Reason + ")"
@@ -352,6 +352,6 @@ func (s *session) writePlaylist(e *env, results []download.Result) error {
 	if err := library.WriteM3U(pl, paths); err != nil {
 		return fmt.Errorf("writing playlist: %w", err)
 	}
-	_, err := fmt.Fprintf(e.out, "playlist: %s (%s)\n", s.rel(pl), plural(len(paths), "track"))
+	_, err := fmt.Fprintf(e.out, "playlist: %s (%s)\n", s.layout.Rel(pl), plural(len(paths), "track"))
 	return err
 }
