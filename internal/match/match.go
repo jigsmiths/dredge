@@ -2,9 +2,11 @@
 package match
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/jigsmiths/dredge/internal/track"
 )
@@ -74,6 +76,9 @@ type scored struct {
 
 // Pick never guesses between different recordings: the download source is
 // searched by exact ISRC, so a wrong one fetches the wrong song or misses.
+// Catalogues list one recording under several ISRCs, one per re-release, so
+// candidates with the same title and artist and about the same length count
+// as one recording; only a track of unknown length can be ambiguous.
 func Pick(want track.Track, cands []Candidate) Result {
 	title := track.NormTitle(want.Title)
 	artists := track.NormArtists(want.Artists)
@@ -105,7 +110,9 @@ func Pick(want track.Track, cands []Candidate) Result {
 	if len(ok) == 0 {
 		return Result{Reason: "no candidate with the same title, artist and length"}
 	}
-	slices.SortStableFunc(ok, func(a, b scored) int { return a.dist - b.dist })
+	slices.SortStableFunc(ok, func(a, b scored) int {
+		return cmp.Or(a.dist-b.dist, strings.Compare(a.c.ISRC, b.c.ISRC)) // the ISRC keeps a rerun on the same pick
+	})
 	best := ok[0]
 
 	rivals := distinctISRC(ok, best.c.ISRC)
@@ -119,16 +126,24 @@ func Pick(want track.Track, cands []Candidate) Result {
 
 	// about equally close in length: a remastered track wants the remastered release, a plain one the plain
 	wantRemaster := remasterRe.MatchString(want.Title)
-	var agree []scored
+	var near, agree []scored
 	for _, s := range ok {
-		if s.dist-best.dist <= TieMarginMS && remasterRe.MatchString(s.c.Title) == wantRemaster {
+		if s.dist-best.dist > TieMarginMS {
+			continue
+		}
+		near = append(near, s)
+		if remasterRe.MatchString(s.c.Title) == wantRemaster {
 			agree = append(agree, s)
 		}
 	}
-	if len(agree) > 0 && len(distinctISRC(agree, agree[0].c.ISRC)) == 0 {
-		return Result{Outcome: Matched, Best: agree[0].c, Reason: "same release tag"}
+	pool, reason := agree, "same release tag"
+	if len(pool) == 0 {
+		pool, reason = near, fmt.Sprintf("closest length (%dms off)", best.dist)
 	}
-	return Result{Outcome: Ambiguous, Reason: fmt.Sprintf("%d different recordings fit equally well", len(rivals)+1)}
+	if want.DurationMS == 0 && len(distinctISRC(pool, pool[0].c.ISRC)) > 0 {
+		return Result{Outcome: Ambiguous, Reason: fmt.Sprintf("%d different recordings fit equally well", len(rivals)+1)}
+	}
+	return Result{Outcome: Matched, Best: pool[0].c, Reason: reason}
 }
 
 // Only tags that name the same recording; remixes, live and extended mixes are not here.
