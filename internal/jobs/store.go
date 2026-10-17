@@ -17,6 +17,7 @@ const (
 	Resolving Status = "resolving" // fetching the link and checking the library
 	Running   Status = "running"   // downloading
 	Done      Status = "done"
+	Partial   Status = "partial" // finished, but some tracks failed
 	Failed    Status = "failed"
 	Cancelled Status = "cancelled"
 )
@@ -291,15 +292,26 @@ func (s *Store) ReplaceTracks(ctx context.Context, id int64, tracks []Track) err
 	return tx.Commit()
 }
 
+const putTrack = `INSERT OR REPLACE INTO job_tracks (job_id, pos, title, artists, album, isrc, status, path, bytes, reason)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+func trackArgs(id int64, t Track) []any {
+	return []any{id, t.Pos, t.Title, strings.Join(t.Artists, "\n"), t.Album, t.ISRC, t.Status, t.Path, t.Bytes, t.Reason}
+}
+
 func insertTracks(ctx context.Context, tx *sql.Tx, id int64, tracks []Track) error {
 	for _, t := range tracks {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO job_tracks (job_id, pos, title, artists, album, isrc, status, path, bytes, reason)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			id, t.Pos, t.Title, strings.Join(t.Artists, "\n"), t.Album, t.ISRC, t.Status, t.Path, t.Bytes, t.Reason); err != nil {
+		if _, err := tx.ExecContext(ctx, putTrack, trackArgs(id, t)...); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// PutTrack adds a row to a job's track list, or replaces the one at its position.
+func (s *Store) PutTrack(ctx context.Context, id int64, t Track) error {
+	_, err := s.db.ExecContext(ctx, putTrack, trackArgs(id, t)...)
+	return err
 }
 
 func (s *Store) SetTrack(ctx context.Context, id int64, pos int, status TrackStatus, path string, bytes int64, reason string) error {
@@ -311,7 +323,7 @@ func (s *Store) SetTrack(ctx context.Context, id int64, pos int, status TrackSta
 // Requeue puts a finished job back in the queue to run again.
 func (s *Store) Requeue(ctx context.Context, id int64) error {
 	res, err := s.db.ExecContext(ctx, `UPDATE jobs SET status = ?, error = '', finished_at = NULL
-		WHERE id = ? AND status IN ('done','failed','cancelled')`, Queued, id)
+		WHERE id = ? AND status IN ('done','partial','failed','cancelled')`, Queued, id)
 	return affected(ctx, s, res, err, id)
 }
 
@@ -329,7 +341,7 @@ func (s *Store) Delete(ctx context.Context, id int64) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	res, err := tx.ExecContext(ctx, `DELETE FROM jobs WHERE id = ? AND status IN ('done','failed','cancelled')`, id)
+	res, err := tx.ExecContext(ctx, `DELETE FROM jobs WHERE id = ? AND status IN ('done','partial','failed','cancelled')`, id)
 	if err := affected(ctx, s, res, err, id); err != nil {
 		return err
 	}

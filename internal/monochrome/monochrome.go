@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jigsmiths/dredge/internal/httpretry"
 	"github.com/jigsmiths/dredge/internal/match"
 )
 
@@ -189,15 +190,17 @@ func (c *Client) fetchText(ctx context.Context, u string) (string, error) {
 	return string(b), err
 }
 
-// getRetry retries the gateway errors the API throws between good answers.
+// getRetry retries gateway errors, rate limits and dropped connections.
 func (c *Client) getRetry(ctx context.Context, u string) (*http.Response, error) {
 	var lastErr error
+	var wait time.Duration
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if attempt > 1 {
-			if err := c.sleep(ctx, time.Duration(attempt-1)*200*time.Millisecond); err != nil {
+			if err := c.sleep(ctx, wait); err != nil {
 				return nil, err
 			}
 		}
+		wait = time.Duration(attempt) * 200 * time.Millisecond
 		rctx, cancel := context.WithTimeout(ctx, c.timeout)
 		req, err := http.NewRequestWithContext(rctx, http.MethodGet, u, nil)
 		if err != nil {
@@ -209,13 +212,18 @@ func (c *Client) getRetry(ctx context.Context, u string) (*http.Response, error)
 		resp, err := c.http.Do(req)
 		if err != nil {
 			cancel()
-			return nil, err
+			if ctx.Err() != nil {
+				return nil, err
+			}
+			lastErr = err
+			continue
 		}
 		resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
-		switch resp.StatusCode {
-		case http.StatusOK:
+		switch {
+		case resp.StatusCode == http.StatusOK:
 			return resp, nil
-		case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		case httpretry.Transient(resp.StatusCode):
+			wait = httpretry.Wait(resp, wait)
 			_ = resp.Body.Close()
 			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
 		default:

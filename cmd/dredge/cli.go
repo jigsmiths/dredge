@@ -179,7 +179,7 @@ func prepare(ctx context.Context, e *env, command string, download bool, args []
 		return fail(err)
 	}
 	s.col = col
-	s.items = resolve.Resolve(ctx, col.Tracks, d.index, d.search, o.cfg.Workers)
+	s.items = resolve.Resolve(ctx, col.Tracks, d.index, d.search, o.cfg.Workers, nil)
 	s.list(e)
 	return s, d.close, nil
 }

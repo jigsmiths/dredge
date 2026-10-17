@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -43,9 +42,19 @@ func (f *fakeSpotify) Fetch(_ context.Context, ref spotify.Ref) (*spotify.Collec
 	return f.cols[ref.ID], nil
 }
 
-type fakeSearch struct{ results map[string][]match.Candidate }
+type fakeSearch struct {
+	results map[string][]match.Candidate
+	hold    map[string]chan struct{} // a query waits for its channel to close
+}
 
-func (s *fakeSearch) Search(_ context.Context, q string, _ int) ([]match.Candidate, error) {
+func (s *fakeSearch) Search(ctx context.Context, q string, _ int) ([]match.Candidate, error) {
+	if gate := s.hold[q]; gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	return s.results[q], nil
 }
 
@@ -54,6 +63,7 @@ type fakeSource struct {
 	stocked map[string]bool
 	stall   chan struct{} // downloads wait for this to close or the context to end
 	started chan string
+	failFor map[string]error // downloads that fail, by ISRC
 }
 
 func (s *fakeSource) Find(_ context.Context, isrc, _, title string) (monochrome.Track, error) {
@@ -78,8 +88,14 @@ func (s *fakeSource) Download(ctx context.Context, t monochrome.Track, w io.Writ
 			return 0, ctx.Err()
 		}
 	}
+	s.mu.Lock()
+	failure := s.failFor[t.ISRC]
+	s.mu.Unlock()
+	if failure != nil {
+		return 0, failure
+	}
 	b := append([]byte("fLaC"), 0x80, 0, 0, 34)
-	b = append(b, bytes.Repeat([]byte{9}, 34)...)
+	b = append(b, make([]byte, 34)...) // a STREAMINFO that declares no length
 	b = append(b, "AUDIO"...)
 	_, err := w.Write(b)
 	return int64(len(b)), err
@@ -96,11 +112,12 @@ func cand(isrc, title, artist string) match.Candidate {
 }
 
 type rig struct {
-	t    *testing.T
-	root string
-	spot *fakeSpotify
-	src  *fakeSource
-	m    *Manager
+	t      *testing.T
+	root   string
+	spot   *fakeSpotify
+	src    *fakeSource
+	search *fakeSearch
+	m      *Manager
 }
 
 func newRig(t *testing.T) *rig {
@@ -119,13 +136,13 @@ func newRig(t *testing.T) *rig {
 		}},
 		plID2: {Kind: spotify.KindPlaylist, Name: "Second", Tracks: []track.Track{tr("Barracuda", "Heart")}},
 	}}
-	search := &fakeSearch{results: map[string][]match.Candidate{
+	r.search = &fakeSearch{results: map[string][]match.Candidate{
 		"Heart barracuda": {cand("ISRC1", "Barracuda", "Heart")},
 		"Muse uprising":   {cand("ISRC2", "Uprising", "Muse")},
 	}}
 	r.src = &fakeSource{stocked: map[string]bool{"ISRC1": true}}
 	r.m = NewManager(NewStore(conn), Deps{
-		Spotify: r.spot, Search: search, Source: r.src, Library: library.NewIndex(conn),
+		Spotify: r.spot, Search: r.search, Source: r.src, Library: library.NewIndex(conn),
 		Layout:  library.Layout{Root: root, SinglesDir: "Singles"},
 		Workers: 2, Attempts: 1, Poll: 20 * time.Millisecond,
 	})

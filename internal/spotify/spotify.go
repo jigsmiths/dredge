@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jigsmiths/dredge/internal/httpretry"
 	"github.com/jigsmiths/dredge/internal/track"
 )
 
@@ -27,6 +28,7 @@ const (
 	albumPageSize    = 50
 	tokenMargin      = time.Minute
 	maxBody          = 16 << 20
+	maxAttempts      = 3
 )
 
 // Persisted-query hashes from the web player bundle. They change when the
@@ -102,6 +104,7 @@ type Client struct {
 	web, api string
 	http     *http.Client
 	now      func() time.Time
+	sleep    func(context.Context, time.Duration) error
 
 	mu      sync.Mutex
 	token   string
@@ -125,7 +128,18 @@ func New(web, api string, hc *http.Client) *Client {
 	for k, v := range defaultHashes {
 		hashes[k] = v
 	}
-	return &Client{web: strings.TrimRight(web, "/"), api: api, http: hc, now: time.Now, hashes: hashes}
+	return &Client{web: strings.TrimRight(web, "/"), api: api, http: hc, now: time.Now, sleep: sleep, hashes: hashes}
+}
+
+func sleep(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (c *Client) Fetch(ctx context.Context, ref Ref) (*Collection, error) {
@@ -482,10 +496,35 @@ func (c *Client) refreshHashes(ctx context.Context) error {
 	return nil
 }
 
+// get retries dropped connections and busy servers, then returns the last status.
 func (c *Client) get(ctx context.Context, u string, headers map[string]string) ([]byte, int, error) {
+	var (
+		body   []byte
+		status int
+		err    error
+		wait   time.Duration
+	)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			if serr := c.sleep(ctx, wait); serr != nil {
+				return nil, 0, serr
+			}
+		}
+		wait = time.Duration(attempt) * 500 * time.Millisecond
+		var resp *http.Response
+		body, status, resp, err = c.getOnce(ctx, u, headers)
+		if ctx.Err() != nil || (err == nil && !httpretry.Transient(status)) {
+			break
+		}
+		wait = httpretry.Wait(resp, wait)
+	}
+	return body, status, err
+}
+
+func (c *Client) getOnce(ctx context.Context, u string, headers map[string]string) ([]byte, int, *http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
 	for k, v := range headers {
@@ -493,11 +532,11 @@ func (c *Client) get(ctx context.Context, u string, headers map[string]string) (
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
-	return body, resp.StatusCode, err
+	return body, resp.StatusCode, resp, err
 }
 
 func truncate(b []byte) string {

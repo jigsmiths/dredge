@@ -39,6 +39,9 @@ body {
 .chip.done {
   background: #236b45;
 }
+.chip.partial {
+  background: #8a6d1d;
+}
 .chip.failed {
   background: #8a2d3b;
 }

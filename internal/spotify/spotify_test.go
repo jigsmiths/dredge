@@ -62,6 +62,8 @@ type fake struct {
 	goodHashes  map[string]string // operation -> hash the API accepts
 	tokenExpiry time.Time
 	respond     func(q query) (int, string) // nil serves fixtures
+	resets      int                         // queries to drop the connection on
+	retryAfter  string
 }
 
 type query struct {
@@ -104,6 +106,7 @@ func hex64(s string) string {
 
 func (f *fake) client() *Client {
 	c := New(f.srv.URL, f.srv.URL+"/pathfinder/v1/query", f.srv.Client())
+	c.sleep = func(context.Context, time.Duration) error { return nil }
 	for op := range f.goodHashes {
 		c.hashes[op] = hex64(f.goodHashes[op])
 	}
@@ -138,7 +141,18 @@ func (f *fake) query(w http.ResponseWriter, r *http.Request) {
 	f.queries = append(f.queries, q)
 	respond := f.respond
 	good := f.goodHashes[q.Op]
+	reset := f.resets > 0
+	if reset {
+		f.resets--
+	}
 	f.mu.Unlock()
+
+	if reset {
+		if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+			_ = conn.Close()
+		}
+		return
+	}
 
 	if q.Hash != hex64(good) {
 		_, _ = fmt.Fprint(w, `{"errors":[{"message":"PersistedQueryNotFound"}]}`)
@@ -151,6 +165,9 @@ func (f *fake) query(w http.ResponseWriter, r *http.Request) {
 		body = fixture(f.t, map[string]string{
 			"fetchPlaylist": "playlist_page.json", "getAlbum": "album.json", "getTrack": "track.json",
 		}[q.Op])
+	}
+	if f.retryAfter != "" {
+		w.Header().Set("Retry-After", f.retryAfter)
 	}
 	w.WriteHeader(status)
 	_, _ = fmt.Fprint(w, body)
@@ -372,6 +389,69 @@ func TestHTTPErrorNamesTheStatus(t *testing.T) {
 	_, err := f.client().Fetch(context.Background(), Ref{KindTrack, "7e4zDInS6tA2jwzphvs2Ay"})
 	if err == nil || !strings.Contains(err.Error(), "429") {
 		t.Fatalf("err = %v, want one naming 429", err)
+	}
+}
+
+func TestATransientStatusIsRetried(t *testing.T) {
+	f := newFake(t)
+	var calls int
+	f.respond = func(q query) (int, string) {
+		calls++
+		if calls == 1 {
+			return http.StatusServiceUnavailable, "busy"
+		}
+		return http.StatusOK, fixture(t, "track.json")
+	}
+	if _, err := f.client().Fetch(context.Background(), Ref{KindTrack, "7e4zDInS6tA2jwzphvs2Ay"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Errorf("made %d queries, want 2", calls)
+	}
+}
+
+func TestADroppedConnectionIsRetried(t *testing.T) {
+	f := newFake(t)
+	f.resets = 2
+	if _, err := f.client().Fetch(context.Background(), Ref{KindTrack, "7e4zDInS6tA2jwzphvs2Ay"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRetryAfterSetsTheWait(t *testing.T) {
+	f := newFake(t)
+	var calls int
+	f.respond = func(q query) (int, string) {
+		calls++
+		if calls == 1 {
+			return http.StatusTooManyRequests, "slow down"
+		}
+		return http.StatusOK, fixture(t, "track.json")
+	}
+	f.retryAfter = "2"
+	c := f.client()
+	var waits []time.Duration
+	c.sleep = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	if _, err := c.Fetch(context.Background(), Ref{KindTrack, "7e4zDInS6tA2jwzphvs2Ay"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(waits) != 1 || waits[0] != 2*time.Second {
+		t.Errorf("waits = %v, want one of 2s", waits)
+	}
+}
+
+func TestACancelledFetchIsNotRetried(t *testing.T) {
+	f := newFake(t)
+	f.resets = 10
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := f.client().Fetch(ctx, Ref{KindTrack, "7e4zDInS6tA2jwzphvs2Ay"}); err == nil {
+		t.Fatal("want an error")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.embedHits+len(f.queries) > 1 {
+		t.Errorf("%d requests after cancel, want no retries", f.embedHits+len(f.queries))
 	}
 }
 

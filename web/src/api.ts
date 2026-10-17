@@ -3,7 +3,7 @@ export type Job = {
   url: string;
   kind: string;
   name: string;
-  status: "queued" | "resolving" | "running" | "done" | "failed" | "cancelled";
+  status: "queued" | "resolving" | "running" | "done" | "partial" | "failed" | "cancelled";
   error?: string;
   created_at: string;
   started_at?: string;

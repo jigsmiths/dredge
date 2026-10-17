@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/jigsmiths/dredge/internal/match"
 	"github.com/jigsmiths/dredge/internal/monochrome"
@@ -51,6 +52,7 @@ func (s Status) String() string {
 
 // Item is one wanted track with its outcome. Track.ISRC is set once matched.
 type Item struct {
+	Pos    int // place in the list it came from
 	Track  track.Track
 	Status Status
 	Path   string // the existing file, when Have
@@ -65,16 +67,36 @@ const searchLimit = 25
 
 // Resolve checks every track with at most workers running at once. A track
 // that cannot be checked is reported as Failed and does not affect the rest.
-func Resolve(ctx context.Context, tracks []track.Track, lib Library, s Searcher, workers int) []Item {
-	res := pool.Map(ctx, workers, tracks, func(ctx context.Context, t track.Track) (Item, error) {
-		return resolveOne(ctx, t, lib, s)
+// each, if set, sees every item as it resolves, one at a time, before Duplicate is marked.
+func Resolve(ctx context.Context, tracks []track.Track, lib Library, s Searcher, workers int, each func(Item)) []Item {
+	type indexed struct {
+		pos int
+		t   track.Track
+	}
+	in := make([]indexed, len(tracks))
+	for i, t := range tracks {
+		in[i] = indexed{i, t}
+	}
+	var mu sync.Mutex
+	res := pool.Map(ctx, workers, in, func(ctx context.Context, w indexed) (Item, error) {
+		it, err := resolveOne(ctx, w.t, lib, s)
+		if err != nil {
+			it = Item{Track: w.t, Status: Failed, Reason: err.Error()}
+		}
+		it.Pos = w.pos
+		if each != nil {
+			mu.Lock()
+			each(it)
+			mu.Unlock()
+		}
+		return it, err
 	})
 	items := make([]Item, len(tracks))
 	seen := map[string]bool{}
 	for i, r := range res {
 		items[i] = r.Value
 		if r.Err != nil {
-			items[i] = Item{Track: tracks[i], Status: Failed, Reason: r.Err.Error()}
+			items[i] = Item{Pos: i, Track: tracks[i], Status: Failed, Reason: r.Err.Error()}
 			continue
 		}
 		if items[i].Status != Need {

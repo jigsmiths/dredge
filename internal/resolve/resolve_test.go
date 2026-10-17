@@ -61,7 +61,7 @@ func TestNeedWhenMatchedAndNotInTheLibrary(t *testing.T) {
 	s := &fakeSearch{results: map[string][]match.Candidate{
 		"Heart barracuda": {cand("USSM10009075", "Barracuda", "Heart", 264000)},
 	}}
-	got := Resolve(context.Background(), []track.Track{tr("Barracuda", "Heart", 261495)}, &fakeLib{}, s, 4)
+	got := resolveAll(context.Background(), []track.Track{tr("Barracuda", "Heart", 261495)}, &fakeLib{}, s, 4)
 	if len(got) != 1 || got[0].Status != Need || got[0].Track.ISRC != "USSM10009075" {
 		t.Fatalf("got %+v", got)
 	}
@@ -71,7 +71,7 @@ func TestNeedCarriesTheCataloguesTrackSoDownloadNeedNotSearchAgain(t *testing.T)
 	c := cand("USSM10009075", "Barracuda", "Heart", 264000)
 	c.ID = "11"
 	s := &fakeSearch{results: map[string][]match.Candidate{"Heart barracuda": {c}}}
-	got := Resolve(context.Background(), []track.Track{tr("Barracuda", "Heart", 261495)}, &fakeLib{}, s, 4)
+	got := resolveAll(context.Background(), []track.Track{tr("Barracuda", "Heart", 261495)}, &fakeLib{}, s, 4)
 	if got[0].Status != Need || got[0].Found == nil || got[0].Found.ID != "11" || got[0].Found.ISRC != "USSM10009075" {
 		t.Fatalf("got %+v", got[0])
 	}
@@ -80,7 +80,7 @@ func TestNeedCarriesTheCataloguesTrackSoDownloadNeedNotSearchAgain(t *testing.T)
 func TestHaveByMetadataSkipsTheSearchEntirely(t *testing.T) {
 	lib := &fakeLib{byMeta: map[string]string{"barracuda|heart": "/music/Heart/b.flac"}}
 	s := &fakeSearch{}
-	got := Resolve(context.Background(), []track.Track{tr("Barracuda", "Heart", 261495)}, lib, s, 4)
+	got := resolveAll(context.Background(), []track.Track{tr("Barracuda", "Heart", 261495)}, lib, s, 4)
 	if got[0].Status != Have || got[0].Path != "/music/Heart/b.flac" {
 		t.Fatalf("got %+v", got[0])
 	}
@@ -94,7 +94,7 @@ func TestHaveByISRCAfterTheMatch(t *testing.T) {
 	s := &fakeSearch{results: map[string][]match.Candidate{
 		"Heart barracuda": {cand("USSM10009075", "Barracuda", "Heart", 264000)},
 	}}
-	got := Resolve(context.Background(), []track.Track{tr("Barracuda", "Heart", 261495)}, lib, s, 4)
+	got := resolveAll(context.Background(), []track.Track{tr("Barracuda", "Heart", 261495)}, lib, s, 4)
 	if got[0].Status != Have || got[0].Path != "/music/x.flac" || got[0].Track.ISRC != "USSM10009075" {
 		t.Fatalf("got %+v", got[0])
 	}
@@ -104,7 +104,7 @@ func TestNoMatchAndAmbiguousSayWhy(t *testing.T) {
 	s := &fakeSearch{results: map[string][]match.Candidate{
 		"A song": {cand("X", "Song", "A", 100000), cand("Y", "Song", "A", 100000)},
 	}}
-	got := Resolve(context.Background(), []track.Track{
+	got := resolveAll(context.Background(), []track.Track{
 		tr("Unknown", "Nobody", 1000),
 		tr("Song", "A", 0), // no length to tell the recordings apart by
 	}, &fakeLib{}, s, 2)
@@ -122,7 +122,7 @@ func TestOneFailureDoesNotSpoilTheRest(t *testing.T) {
 		results: map[string][]match.Candidate{"B two": {cand("ISRC2", "Two", "B", 1000)}},
 		errFor:  map[string]error{"A one": boom},
 	}
-	got := Resolve(context.Background(), []track.Track{tr("One", "A", 1000), tr("Two", "B", 1000)}, &fakeLib{}, s, 2)
+	got := resolveAll(context.Background(), []track.Track{tr("One", "A", 1000), tr("Two", "B", 1000)}, &fakeLib{}, s, 2)
 	if got[0].Status != Failed || !strings.Contains(got[0].Reason, "search down") {
 		t.Errorf("first = %+v", got[0])
 	}
@@ -133,7 +133,7 @@ func TestOneFailureDoesNotSpoilTheRest(t *testing.T) {
 
 func TestLibraryErrorFailsTheItem(t *testing.T) {
 	lib := &fakeLib{err: errors.New("db locked")}
-	got := Resolve(context.Background(), []track.Track{tr("One", "A", 1000)}, lib, &fakeSearch{}, 1)
+	got := resolveAll(context.Background(), []track.Track{tr("One", "A", 1000)}, lib, &fakeSearch{}, 1)
 	if got[0].Status != Failed || !strings.Contains(got[0].Reason, "db locked") {
 		t.Errorf("got %+v", got[0])
 	}
@@ -143,7 +143,7 @@ func TestTheSameRecordingTwiceInAPlaylistIsOneDownload(t *testing.T) {
 	s := &fakeSearch{results: map[string][]match.Candidate{
 		"Heart barracuda": {cand("USSM10009075", "Barracuda", "Heart", 264000)},
 	}}
-	got := Resolve(context.Background(), []track.Track{
+	got := resolveAll(context.Background(), []track.Track{
 		tr("Barracuda", "Heart", 261495), tr("Barracuda", "Heart", 261495),
 	}, &fakeLib{}, s, 4)
 	if got[0].Status != Need || got[1].Status != Duplicate {
@@ -155,7 +155,7 @@ func TestQueryDropsReleaseTagsAndKeepsTheFirstArtist(t *testing.T) {
 	s := &fakeSearch{results: map[string][]match.Candidate{
 		"Heart crazy on you": {cand("USCA28600007", "Crazy On You", "Heart", 1000)},
 	}}
-	got := Resolve(context.Background(), []track.Track{{
+	got := resolveAll(context.Background(), []track.Track{{
 		Title: "Crazy On You - 2004 Remaster", Artists: []string{"Heart", "Guest"}, DurationMS: 1000,
 	}}, &fakeLib{}, s, 1)
 	if len(s.queries) != 1 || s.queries[0] != "Heart crazy on you" || got[0].Status != Need {
@@ -167,7 +167,7 @@ func TestRetriesWithTheTitleAloneWhenTheArtistQueryFindsNothing(t *testing.T) {
 	s := &fakeSearch{results: map[string][]match.Candidate{
 		"free bird": {cand("USMC17301722", "Free Bird", "Lynyrd Skynyrd", 558000)},
 	}}
-	got := Resolve(context.Background(), []track.Track{tr("Free Bird", "Lynyrd Skynyrd", 558000)}, &fakeLib{}, s, 1)
+	got := resolveAll(context.Background(), []track.Track{tr("Free Bird", "Lynyrd Skynyrd", 558000)}, &fakeLib{}, s, 1)
 	if got[0].Status != Need || got[0].Track.ISRC != "USMC17301722" {
 		t.Fatalf("got %+v", got[0])
 	}
@@ -180,7 +180,7 @@ func TestDoesNotRetryOnceTheFirstQueryDecided(t *testing.T) {
 	s := &fakeSearch{results: map[string][]match.Candidate{
 		"A song": {cand("X", "Song", "A", 100000), cand("Y", "Song", "A", 100000)},
 	}}
-	got := Resolve(context.Background(), []track.Track{tr("Song", "A", 0)}, &fakeLib{}, s, 1)
+	got := resolveAll(context.Background(), []track.Track{tr("Song", "A", 0)}, &fakeLib{}, s, 1)
 	if got[0].Status != Ambiguous || len(s.queries) != 1 {
 		t.Errorf("status = %v after %d queries, want ambiguous after 1", got[0].Status, len(s.queries))
 	}
@@ -188,7 +188,7 @@ func TestDoesNotRetryOnceTheFirstQueryDecided(t *testing.T) {
 
 func TestAnErrorOnTheSecondQueryFailsTheItem(t *testing.T) {
 	s := &fakeSearch{errFor: map[string]error{"free bird": errors.New("api down")}}
-	got := Resolve(context.Background(), []track.Track{tr("Free Bird", "Lynyrd Skynyrd", 1000)}, &fakeLib{}, s, 1)
+	got := resolveAll(context.Background(), []track.Track{tr("Free Bird", "Lynyrd Skynyrd", 1000)}, &fakeLib{}, s, 1)
 	if got[0].Status != Failed || !strings.Contains(got[0].Reason, "api down") {
 		t.Errorf("got %+v", got[0])
 	}
@@ -202,7 +202,7 @@ func TestResultsKeepInputOrderUnderConcurrency(t *testing.T) {
 		in = append(in, tr(title, "Artist", 1000))
 		s.results["Artist "+track.NormTitle(title)] = []match.Candidate{cand(fmt.Sprintf("ISRC%02d", i), title, "Artist", 1000)}
 	}
-	got := Resolve(context.Background(), in, &fakeLib{}, s, 8)
+	got := resolveAll(context.Background(), in, &fakeLib{}, s, 8)
 	for i, it := range got {
 		if it.Track.Title != in[i].Title || it.Track.ISRC != fmt.Sprintf("ISRC%02d", i) {
 			t.Fatalf("item %d = %+v", i, it.Track)
@@ -213,14 +213,14 @@ func TestResultsKeepInputOrderUnderConcurrency(t *testing.T) {
 func TestCancelledContextFailsTheItems(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	got := Resolve(ctx, []track.Track{tr("One", "A", 1000)}, &fakeLib{}, &fakeSearch{}, 1)
+	got := resolveAll(ctx, []track.Track{tr("One", "A", 1000)}, &fakeLib{}, &fakeSearch{}, 1)
 	if got[0].Status != Failed {
 		t.Errorf("got %+v", got[0])
 	}
 }
 
 func TestTracksWithoutAnArtistCannotBeMatched(t *testing.T) {
-	got := Resolve(context.Background(), []track.Track{{Title: "Orphan", DurationMS: 1}}, &fakeLib{}, &fakeSearch{}, 1)
+	got := resolveAll(context.Background(), []track.Track{{Title: "Orphan", DurationMS: 1}}, &fakeLib{}, &fakeSearch{}, 1)
 	if got[0].Status != NoMatch {
 		t.Errorf("got %+v", got[0])
 	}
