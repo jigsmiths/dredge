@@ -21,8 +21,26 @@ type Candidate struct {
 	ISRC       string
 	Title      string
 	Artists    []string
-	Album      string
 	DurationMS int
+
+	// the source's own handle on the recording, so a match can be fetched without searching again
+	ID         string
+	ReleaseID  string
+	ArtworkURL string
+}
+
+// Distinct drops repeats of a recording, which a catalogue lists once per
+// release, keeping the first of each ISRC.
+func Distinct(cands []Candidate) []Candidate {
+	seen := map[string]bool{}
+	var out []Candidate
+	for _, c := range cands {
+		if !seen[c.ISRC] {
+			seen[c.ISRC] = true
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 type Outcome int
@@ -99,20 +117,7 @@ func Pick(want track.Track, cands []Candidate) Result {
 		return Result{Outcome: Matched, Best: best.c, Reason: fmt.Sprintf("closest length (%dms off)", best.dist)}
 	}
 
-	// about equally close in length: the album decides
-	album := track.NormTitle(want.Album)
-	if album != "" {
-		var byAlbum []scored
-		for _, s := range ok {
-			if s.dist-best.dist <= TieMarginMS && track.NormTitle(s.c.Album) == album {
-				byAlbum = append(byAlbum, s)
-			}
-		}
-		if len(byAlbum) > 0 && len(distinctISRC(byAlbum, byAlbum[0].c.ISRC)) == 0 {
-			return Result{Outcome: Matched, Best: byAlbum[0].c, Reason: "same album"}
-		}
-	}
-	// still tied: a remastered track wants the remastered release, a plain one the plain
+	// about equally close in length: a remastered track wants the remastered release, a plain one the plain
 	wantRemaster := remasterRe.MatchString(want.Title)
 	var agree []scored
 	for _, s := range ok {
@@ -122,10 +127,6 @@ func Pick(want track.Track, cands []Candidate) Result {
 	}
 	if len(agree) > 0 && len(distinctISRC(agree, agree[0].c.ISRC)) == 0 {
 		return Result{Outcome: Matched, Best: agree[0].c, Reason: "same release tag"}
-	}
-	if want.DurationMS > 0 {
-		// same title, artist and length within a second: releases of one recording
-		return Result{Outcome: Matched, Best: best.c, Reason: fmt.Sprintf("%d releases fit equally well; took the closest", len(rivals)+1)}
 	}
 	return Result{Outcome: Ambiguous, Reason: fmt.Sprintf("%d different recordings fit equally well", len(rivals)+1)}
 }

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,7 +67,7 @@ type Result struct {
 	Err     error
 }
 
-const defaultAttempts = 3
+const DefaultAttempts = 3
 
 type Options struct {
 	Layout   library.Layout
@@ -81,7 +82,7 @@ type Options struct {
 
 func (o Options) attempts() int {
 	if o.Attempts < 1 {
-		return defaultAttempts
+		return DefaultAttempts
 	}
 	return o.Attempts
 }
@@ -105,13 +106,13 @@ func Run(ctx context.Context, items []resolve.Item, src Source, rec Recorder, op
 		}
 	}
 	res := pool.Map(ctx, opt.Workers, items, func(ctx context.Context, it resolve.Item) (Result, error) {
-		if opt.Started != nil && it.Status == resolve.Need {
-			progress.Lock()
-			opt.Started(it)
-			progress.Unlock()
-		}
 		if it.Status == resolve.Need {
 			slog.Info("track started", "title", it.Track.Title, "artist", firstArtist(it.Track))
+			if opt.Started != nil {
+				progress.Lock()
+				opt.Started(it)
+				progress.Unlock()
+			}
 		}
 		began := time.Now()
 		r := one(ctx, it, src, rec, opt, &place)
@@ -169,19 +170,21 @@ func one(ctx context.Context, it resolve.Item, src Source, rec Recorder, opt Opt
 	}
 
 	dst := opt.Layout.Path(opt.Kind, it.Track)
-	if exists(dst) {
-		return Result{Item: it, Outcome: Exists, Path: dst}
+	if library.Exists(dst) {
+		return taken(it, dst)
 	}
-	var artist string
-	if len(it.Track.Artists) > 0 {
-		artist = it.Track.Artists[0]
-	}
-	mono, err := src.Find(ctx, it.Track.ISRC, artist, it.Track.Title)
-	if errors.Is(err, monochrome.ErrNotStocked) {
-		return Result{Item: it, Outcome: NotStocked}
-	}
-	if err != nil {
-		return fail("find: %w", err)
+	var mono monochrome.Track
+	if it.Found != nil {
+		mono = *it.Found
+	} else {
+		var err error
+		mono, err = src.Find(ctx, it.Track.ISRC, firstArtist(it.Track), it.Track.Title)
+		if errors.Is(err, monochrome.ErrNotStocked) {
+			return Result{Item: it, Outcome: NotStocked}
+		}
+		if err != nil {
+			return fail("find: %w", err)
+		}
 	}
 	cover, _ := src.Artwork(ctx, mono) // a missing cover is not worth failing for
 
@@ -207,9 +210,9 @@ func one(ctx context.Context, it resolve.Item, src Source, rec Recorder, opt Opt
 	}()
 
 	place.Lock()
-	if exists(dst) {
+	if library.Exists(dst) {
 		place.Unlock()
-		return Result{Item: it, Outcome: Exists, Path: dst}
+		return taken(it, dst)
 	}
 	err = os.Rename(tmp, dst)
 	place.Unlock()
@@ -296,9 +299,28 @@ func wait(ctx context.Context, d time.Duration) error {
 	}
 }
 
-func exists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+// taken is the result for a file already at dst: Exists, unless the file is
+// tagged as another recording that happens to share the name.
+func taken(it resolve.Item, dst string) Result {
+	if other := otherISRC(dst, it.Track.ISRC); other != "" {
+		return Result{Item: it, Outcome: Failed, Err: fmt.Errorf("a different recording (%s) is already at %s", other, dst)}
+	}
+	return Result{Item: it, Outcome: Exists, Path: dst}
+}
+
+// otherISRC is the ISRC the file at path is tagged with when it differs from
+// isrc, and empty when it matches or cannot be told.
+func otherISRC(path, isrc string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = f.Close() }()
+	t, err := flacmeta.Read(f)
+	if err != nil || t.ISRC == "" || isrc == "" || strings.EqualFold(t.ISRC, isrc) {
+		return ""
+	}
+	return t.ISRC
 }
 
 func tagsFor(it resolve.Item, cover []byte) flacmeta.Tags {

@@ -141,6 +141,22 @@ func TestSearchReturnsPlayableCandidatesWithTheirISRC(t *testing.T) {
 	}
 }
 
+func TestSearchCandidatesCarryTheTrackToDownload(t *testing.T) {
+	f := newFake(t)
+	f.search = func(string) string {
+		return `{"tracks":[{"id":"1","trackId":"11","title":"Barracuda","artistNames":["Heart"],"isrc":"USSM10009075","playable":true,"duration":261933,"releaseId":"99","artwork":"https://img/x.jpg"}]}`
+	}
+	got, err := f.client().Search(context.Background(), "Heart barracuda", 25)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got %+v err=%v", got, err)
+	}
+	tk := TrackFrom(got[0])
+	if tk.ID != "11" || tk.ReleaseID != "99" || tk.ArtworkURL != "https://img/x.jpg" ||
+		tk.ISRC != "USSM10009075" || tk.Title != "Barracuda" || tk.DurationMS != 261933 || tk.Artists[0] != "Heart" {
+		t.Errorf("track = %+v", tk)
+	}
+}
+
 func TestSearchSurfacesTransportErrors(t *testing.T) {
 	f := newFake(t)
 	f.statuses = []int{502, 502, 502}
@@ -379,6 +395,29 @@ func TestDownloadGivesUpOnAStalledServer(t *testing.T) {
 	_, err := c.Download(context.Background(), Track{ID: "1"}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "stalled") {
 		t.Fatalf("err = %v, want one saying the download stalled", err)
+	}
+}
+
+func TestASearchThatNeverAnswersTimesOut(t *testing.T) {
+	f := newFake(t)
+	release := make(chan struct{})
+	defer close(release)
+	f.search = func(string) string {
+		<-release
+		return ""
+	}
+	c := f.client()
+	c.timeout = 50 * time.Millisecond
+	c.override = f.srv.URL + "/api"
+	done := make(chan error, 1)
+	go func() { _, err := c.Search(context.Background(), "x", 5); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("err = nil, want a timeout")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("search still waiting long after the timeout")
 	}
 }
 

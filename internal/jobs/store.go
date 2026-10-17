@@ -23,18 +23,20 @@ const (
 
 func (s Status) active() bool { return s == Queued || s == Resolving || s == Running }
 
+type TrackStatus string
+
 // Track statuses. Pending and Downloading are still to do; the rest are final.
 const (
-	TrackPending     = "pending"
-	TrackDownloading = "downloading"
-	TrackDone        = "done"
-	TrackHave        = "have"
-	TrackNoMatch     = "no_match"
-	TrackAmbiguous   = "ambiguous"
-	TrackDuplicate   = "duplicate"
-	TrackNotStocked  = "not_stocked"
-	TrackLossyOnly   = "lossy_only"
-	TrackFailed      = "failed"
+	TrackPending     TrackStatus = "pending"
+	TrackDownloading TrackStatus = "downloading"
+	TrackDone        TrackStatus = "done"
+	TrackHave        TrackStatus = "have"
+	TrackNoMatch     TrackStatus = "no_match"
+	TrackAmbiguous   TrackStatus = "ambiguous"
+	TrackDuplicate   TrackStatus = "duplicate"
+	TrackNotStocked  TrackStatus = "not_stocked"
+	TrackLossyOnly   TrackStatus = "lossy_only"
+	TrackFailed      TrackStatus = "failed"
 )
 
 var (
@@ -43,29 +45,29 @@ var (
 )
 
 type Job struct {
-	ID         int64          `json:"id"`
-	URL        string         `json:"url"`
-	Kind       string         `json:"kind"`
-	Name       string         `json:"name"`
-	Status     Status         `json:"status"`
-	Error      string         `json:"error,omitempty"`
-	CreatedAt  time.Time      `json:"created_at"`
-	StartedAt  *time.Time     `json:"started_at,omitempty"`
-	FinishedAt *time.Time     `json:"finished_at,omitempty"`
-	Total      int            `json:"total"`
-	Counts     map[string]int `json:"counts"` // tracks per status
+	ID         int64               `json:"id"`
+	URL        string              `json:"url"`
+	Kind       string              `json:"kind"`
+	Name       string              `json:"name"`
+	Status     Status              `json:"status"`
+	Error      string              `json:"error,omitempty"`
+	CreatedAt  time.Time           `json:"created_at"`
+	StartedAt  *time.Time          `json:"started_at,omitempty"`
+	FinishedAt *time.Time          `json:"finished_at,omitempty"`
+	Total      int                 `json:"total"`
+	Counts     map[TrackStatus]int `json:"counts"` // tracks per status
 }
 
 type Track struct {
-	Pos     int      `json:"pos"`
-	Title   string   `json:"title"`
-	Artists []string `json:"artists"`
-	Album   string   `json:"album,omitempty"`
-	ISRC    string   `json:"isrc,omitempty"`
-	Status  string   `json:"status"`
-	Path    string   `json:"path,omitempty"` // relative to the library root
-	Bytes   int64    `json:"bytes,omitempty"`
-	Reason  string   `json:"reason,omitempty"`
+	Pos     int         `json:"pos"`
+	Title   string      `json:"title"`
+	Artists []string    `json:"artists"`
+	Album   string      `json:"album,omitempty"`
+	ISRC    string      `json:"isrc,omitempty"`
+	Status  TrackStatus `json:"status"`
+	Path    string      `json:"path,omitempty"` // relative to the library root
+	Bytes   int64       `json:"bytes,omitempty"`
+	Reason  string      `json:"reason,omitempty"`
 
 	// live while downloading; never stored
 	BytesDone  int64 `json:"bytes_done,omitempty"`
@@ -98,7 +100,7 @@ func scanJob(r scanner) (Job, error) {
 		return Job{}, err
 	}
 	j.CreatedAt, j.StartedAt, j.FinishedAt = time.Unix(created, 0), ptr(started), ptr(finished)
-	j.Counts = map[string]int{}
+	j.Counts = map[TrackStatus]int{}
 	return j, nil
 }
 
@@ -159,7 +161,7 @@ func (s *Store) Get(ctx context.Context, id int64) (Job, error) {
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		var st string
+		var st TrackStatus
 		var n int
 		if err := rows.Scan(&st, &n); err != nil {
 			return Job{}, err
@@ -171,41 +173,51 @@ func (s *Store) Get(ctx context.Context, id int64) (Job, error) {
 
 // List returns jobs newest first, optionally only those with status.
 func (s *Store) List(ctx context.Context, status string) ([]Job, error) {
-	q, args := `SELECT id FROM jobs`, []any{}
+	newest, args := `SELECT id FROM jobs`, []any{}
 	if status != "" {
-		q += ` WHERE status = ?`
+		newest += ` WHERE status = ?`
 		args = append(args, status)
 	}
-	rows, err := s.db.QueryContext(ctx, q+` ORDER BY id DESC LIMIT 200`, args...)
+	newest += ` ORDER BY id DESC LIMIT 200`
+
+	out := []Job{}
+	byID := map[int64]int{}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+jobCols+` FROM jobs WHERE id IN (`+newest+`) ORDER BY id DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
-	var ids []int64
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, err
-	}
-	_ = rows.Close()
-	out := make([]Job, 0, len(ids))
-	for _, id := range ids {
-		j, err := s.Get(ctx, id)
-		if errors.Is(err, ErrNotFound) {
-			continue
-		}
+		j, err := scanJob(rows)
 		if err != nil {
 			return nil, err
 		}
+		byID[j.ID] = len(out)
 		out = append(out, j)
 	}
-	return out, nil
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	_ = rows.Close()
+
+	counts, err := s.db.QueryContext(ctx,
+		`SELECT job_id, status, COUNT(*) FROM job_tracks WHERE job_id IN (`+newest+`) GROUP BY job_id, status`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = counts.Close() }()
+	for counts.Next() {
+		var id int64
+		var st TrackStatus
+		var n int
+		if err := counts.Scan(&id, &st, &n); err != nil {
+			return nil, err
+		}
+		if i, ok := byID[id]; ok {
+			out[i].Counts[st], out[i].Total = n, out[i].Total+n
+		}
+	}
+	return out, counts.Err()
 }
 
 func (s *Store) Tracks(ctx context.Context, id int64) ([]Track, error) {
@@ -290,7 +302,7 @@ func insertTracks(ctx context.Context, tx *sql.Tx, id int64, tracks []Track) err
 	return nil
 }
 
-func (s *Store) SetTrack(ctx context.Context, id int64, pos int, status, path string, bytes int64, reason string) error {
+func (s *Store) SetTrack(ctx context.Context, id int64, pos int, status TrackStatus, path string, bytes int64, reason string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE job_tracks SET status = ?, path = ?, bytes = ?, reason = ?
 		WHERE job_id = ? AND pos = ?`, status, path, bytes, reason, id, pos)
 	return err

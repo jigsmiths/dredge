@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,7 +32,9 @@ const (
 	maxPage      = 16 << 20
 	maxArtwork   = 8 << 20
 	stallTimeout = time.Minute
-	userAgent    = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
+
+	requestTimeout = 30 * time.Second
+	userAgent      = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
 )
 
 // ErrNotStocked means the catalogue answered and does not have the recording.
@@ -57,6 +60,7 @@ type Client struct {
 	now      func() time.Time
 	sleep    func(context.Context, time.Duration) error
 	stall    time.Duration
+	timeout  time.Duration // for each request that is not a download
 
 	mu      sync.Mutex
 	api     string
@@ -74,7 +78,7 @@ func New(web, apiOverride string, hc *http.Client) *Client {
 	}
 	return &Client{
 		web: web, override: strings.TrimRight(apiOverride, "/"), http: hc,
-		now: time.Now, sleep: sleep, stall: stallTimeout,
+		now: time.Now, sleep: sleep, stall: stallTimeout, timeout: requestTimeout,
 	}
 }
 
@@ -194,16 +198,20 @@ func (c *Client) getRetry(ctx context.Context, u string) (*http.Response, error)
 				return nil, err
 			}
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		rctx, cancel := context.WithTimeout(ctx, c.timeout)
+		req, err := http.NewRequestWithContext(rctx, http.MethodGet, u, nil)
 		if err != nil {
+			cancel()
 			return nil, err
 		}
 		req.Header.Set("User-Agent", userAgent)
 		req.Header.Set("Accept", "application/json, text/html, */*")
 		resp, err := c.http.Do(req)
 		if err != nil {
+			cancel()
 			return nil, err
 		}
+		resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
 		switch resp.StatusCode {
 		case http.StatusOK:
 			return resp, nil
@@ -216,6 +224,17 @@ func (c *Client) getRetry(ctx context.Context, u string) (*http.Response, error)
 		}
 	}
 	return nil, lastErr
+}
+
+// cancelOnClose keeps a request's deadline running until its body is closed.
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *cancelOnClose) Close() error {
+	defer b.cancel()
+	return b.ReadCloser.Close()
 }
 
 // flexString reads an id that may arrive as a string or a number.
@@ -285,9 +304,18 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]match.C
 		}
 		out = append(out, match.Candidate{
 			ISRC: strings.ToUpper(strings.TrimSpace(t.ISRC)), Title: t.Title, Artists: t.ArtistNames, DurationMS: t.Duration,
+			ID: t.id(), ReleaseID: string(t.ReleaseID), ArtworkURL: t.Artwork,
 		})
 	}
 	return out, nil
+}
+
+// TrackFrom is the downloadable track a search candidate stands for.
+func TrackFrom(c match.Candidate) Track {
+	return Track{
+		ID: c.ID, Title: c.Title, Artists: c.Artists, ISRC: c.ISRC, DurationMS: c.DurationMS,
+		ReleaseID: c.ReleaseID, ArtworkURL: c.ArtworkURL,
+	}
 }
 
 var (
@@ -302,11 +330,7 @@ func queries(artist, title string) []string {
 		if q == "" {
 			continue
 		}
-		dup := false
-		for _, o := range out {
-			dup = dup || strings.EqualFold(o, q)
-		}
-		if !dup {
+		if !slices.ContainsFunc(out, func(o string) bool { return strings.EqualFold(o, q) }) {
 			out = append(out, q)
 		}
 	}
@@ -359,15 +383,15 @@ func ReportProgress(ctx context.Context, done, total int64) {
 }
 
 type countReader struct {
+	ctx         context.Context
 	r           io.Reader
 	done, total int64
-	f           func(done, total int64)
 }
 
 func (c *countReader) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
 	c.done += int64(n)
-	c.f(c.done, c.total)
+	ReportProgress(c.ctx, c.done, c.total)
 	return n, err
 }
 
@@ -403,13 +427,13 @@ func (c *Client) Download(ctx context.Context, t Track, w io.Writer) (int64, err
 		return 0, causeOr(ctx, errors.New("monochrome: download is not a FLAC file"))
 	}
 	total := resp.ContentLength
-	progress, _ := ctx.Value(progressKey{}).(func(done, total int64))
+	_, counting := ctx.Value(progressKey{}).(func(done, total int64))
 	var n int64
 	for resumes := 0; ; resumes++ {
 		rd := &errReader{r: br}
 		var src io.Reader = rd
-		if progress != nil {
-			src = &countReader{r: rd, done: n, total: total, f: progress}
+		if counting {
+			src = &countReader{ctx: ctx, r: rd, done: n, total: total}
 		}
 		m, err := io.Copy(w, src)
 		n += m

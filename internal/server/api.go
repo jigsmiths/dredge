@@ -14,6 +14,7 @@ import (
 
 	"github.com/jigsmiths/dredge/internal/jobs"
 	"github.com/jigsmiths/dredge/internal/library"
+	"github.com/jigsmiths/dredge/internal/match"
 	"github.com/jigsmiths/dredge/internal/resolve"
 )
 
@@ -141,12 +142,8 @@ func (a *api) search(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "the catalogue could not be searched")
 		return
 	}
-	out, seen := []hit{}, map[string]bool{}
-	for _, c := range cands {
-		if seen[c.ISRC] {
-			continue
-		}
-		seen[c.ISRC] = true
+	out := []hit{}
+	for _, c := range match.Distinct(cands) {
 		out = append(out, hit{c.ISRC, c.Title, c.Artists, c.DurationMS})
 	}
 	writeJSON(w, http.StatusOK, out)

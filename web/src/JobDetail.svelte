@@ -42,7 +42,7 @@
   let copied = $state(false);
   async function copyLink() {
     try {
-      await navigator.clipboard.writeText(job!.url);
+      await navigator.clipboard.writeText(job?.url ?? "");
       copied = true;
       setTimeout(() => (copied = false), 1500);
     } catch {
@@ -207,22 +207,5 @@
   .bad,
   .error {
     color: #cf6679;
-  }
-  .chip {
-    font-size: 0.75rem;
-    padding: 0.1rem 0.5rem;
-    border-radius: 99px;
-    background: #333;
-    color: #e0e0e0;
-  }
-  .chip.running,
-  .chip.resolving {
-    background: #1d5a8a;
-  }
-  .chip.done {
-    background: #236b45;
-  }
-  .chip.failed {
-    background: #8a2d3b;
   }
 </style>

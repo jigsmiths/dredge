@@ -35,6 +35,15 @@ const (
 	Album
 )
 
+// KindFor is how a download is filed: a whole album under its album, anything
+// else as a single.
+func KindFor(album bool) Kind {
+	if album {
+		return Album
+	}
+	return Single
+}
+
 // Layout is where the library lives. SinglesDir is relative to Root; empty
 // files singles straight under Root.
 type Layout struct {
@@ -70,6 +79,15 @@ func (l Layout) Path(kind Kind, t track.Track) string {
 	}
 	return filepath.Join(l.Root,
 		safe(artist, "Unknown Artist"), safe(t.Album, "Unknown Album"), safe(name, "Unknown Title")+".flac")
+}
+
+// Rel is path relative to the library root with forward slashes, or path
+// itself when it is not under the root.
+func (l Layout) Rel(path string) string {
+	if r, err := filepath.Rel(l.Root, path); err == nil {
+		return filepath.ToSlash(r)
+	}
+	return path
 }
 
 // PlaylistPath names playlist files the way MusicGrabber does, so a playlist
@@ -183,7 +201,8 @@ func (x *Index) Add(ctx context.Context, e Entry) error {
 	return x.put(ctx, e, fi.ModTime().UnixNano(), fi.Size())
 }
 
-func exists(path string) bool {
+// Exists reports whether something is at path.
+func Exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
@@ -218,7 +237,7 @@ func (x *Index) ByISRC(ctx context.Context, isrc string) (string, bool, error) {
 		return "", false, err
 	}
 	for _, r := range rs {
-		if exists(r.path) {
+		if Exists(r.path) {
 			return r.path, true, nil
 		}
 	}
@@ -238,7 +257,7 @@ func (x *Index) ByMeta(ctx context.Context, title string, artists []string) (str
 	}
 	for _, r := range rs {
 		for _, w := range wanted {
-			if strings.Contains(r.artists, "|"+w+"|") && exists(r.path) {
+			if strings.Contains(r.artists, "|"+w+"|") && Exists(r.path) {
 				return r.path, true, nil
 			}
 		}
@@ -267,7 +286,7 @@ func (l Layout) fromPath(path string) (Entry, bool) {
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	if l.SinglesDir != "" {
-		if len(parts) < 1 || parts[0] != l.SinglesDir {
+		if parts[0] != l.SinglesDir {
 			return Entry{}, false
 		}
 		parts = parts[1:]
@@ -282,6 +301,25 @@ func (l Layout) fromPath(path string) (Entry, bool) {
 	return Entry{Path: path, Title: title, Artists: []string{parts[0]}}, true
 }
 
+// stamps returns what the index holds for the files under prefix.
+func (x *Index) stamps(ctx context.Context, prefix string) (map[string]stamp, error) {
+	rows, err := x.db.QueryContext(ctx, `SELECT path, mtime, size FROM library WHERE substr(path, 1, ?) = ?`, len(prefix), prefix)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	known := map[string]stamp{}
+	for rows.Next() {
+		var p string
+		var s stamp
+		if err := rows.Scan(&p, &s.mtime, &s.size); err != nil {
+			return nil, err
+		}
+		known[p] = s
+	}
+	return known, rows.Err()
+}
+
 // Scan brings the index in line with the files under the library root. Files
 // whose size and modification time are unchanged are not read again.
 func (x *Index) Scan(ctx context.Context, l Layout) (ScanStats, error) {
@@ -292,24 +330,10 @@ func (x *Index) Scan(ctx context.Context, l Layout) (ScanStats, error) {
 	}
 	prefix := strings.TrimRight(root, string(filepath.Separator)) + string(filepath.Separator)
 
-	known := map[string]stamp{}
-	rows, err := x.db.QueryContext(ctx, `SELECT path, mtime, size FROM library WHERE substr(path, 1, ?) = ?`, len(prefix), prefix)
+	known, err := x.stamps(ctx, prefix)
 	if err != nil {
 		return st, err
 	}
-	for rows.Next() {
-		var p string
-		var s stamp
-		if err := rows.Scan(&p, &s.mtime, &s.size); err != nil {
-			_ = rows.Close()
-			return st, err
-		}
-		known[p] = s
-	}
-	if err := rows.Err(); err != nil {
-		return st, err
-	}
-	_ = rows.Close()
 
 	seen := map[string]bool{}
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {

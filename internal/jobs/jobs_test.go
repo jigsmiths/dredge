@@ -92,7 +92,7 @@ func tr(title, artist string) track.Track {
 }
 
 func cand(isrc, title, artist string) match.Candidate {
-	return match.Candidate{ISRC: isrc, Title: title, Artists: []string{artist}, Album: "Album", DurationMS: 200000}
+	return match.Candidate{ISRC: isrc, Title: title, Artists: []string{artist}, DurationMS: 200000}
 }
 
 type rig struct {
@@ -191,6 +191,40 @@ func TestSubmitNormalisesTheLinkAndReusesAnActiveJob(t *testing.T) {
 	b, created, err := r.m.Submit(context.Background(), "spotify:playlist:"+plID)
 	if err != nil || created || b.ID != a.ID {
 		t.Errorf("b = %+v created=%v err=%v, want the first job", b, created, err)
+	}
+}
+
+func TestConcurrentSubmitsOfOneLinkQueueOneJob(t *testing.T) {
+	r := newRig(t)
+	const n = 8
+	var wg sync.WaitGroup
+	created := make(chan bool, n)
+	errs := make(chan error, n)
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, c, err := r.m.Submit(context.Background(), link(plID))
+			created <- c
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(created)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Errorf("submit: %v", err)
+		}
+	}
+	made := 0
+	for c := range created {
+		if c {
+			made++
+		}
+	}
+	if made != 1 {
+		t.Errorf("%d submits created a job, want 1", made)
 	}
 }
 
@@ -408,6 +442,31 @@ func TestDeleteOnlyRemovesFinishedJobs(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(r.root, "Singles/Heart/Barracuda.flac")); err != nil {
 		t.Errorf("deleting the record removed a file: %v", err)
+	}
+}
+
+func TestListCarriesTheSameCountsAsGet(t *testing.T) {
+	r := newRig(t)
+	r.start()
+	a := r.waitFor(r.submit(plID).ID, Done)
+	b := r.waitFor(r.submit(plID2).ID, Done)
+	all, err := r.m.List(context.Background(), "")
+	if err != nil || len(all) != 2 {
+		t.Fatalf("all = %+v err=%v", all, err)
+	}
+	for _, got := range []Job{all[1], all[0]} {
+		want := a
+		if got.ID == b.ID {
+			want = r.mustGet(b.ID)
+		}
+		if got.Total != want.Total || len(got.Counts) != len(want.Counts) {
+			t.Errorf("job %d: list says %d %v, get says %d %v", got.ID, got.Total, got.Counts, want.Total, want.Counts)
+		}
+		for k, n := range want.Counts {
+			if got.Counts[k] != n {
+				t.Errorf("job %d: %s = %d, get says %d", got.ID, k, got.Counts[k], n)
+			}
+		}
 	}
 }
 

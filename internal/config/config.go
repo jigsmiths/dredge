@@ -30,13 +30,19 @@ func Load() *Config {
 
 		PyroscopeServerAddress: os.Getenv("PYROSCOPE_SERVER_ADDRESS"),
 	}
-	if c.SinglesDir == "-" {
-		c.SinglesDir = ""
-	}
+	c.SinglesDir = SinglesDir(c.SinglesDir)
 	if n, err := strconv.Atoi(os.Getenv("WORKERS")); err == nil && n > 0 {
 		c.Workers = n
 	}
 	return c
+}
+
+// SinglesDir reads the "-" given for no singles folder as empty.
+func SinglesDir(s string) string {
+	if s == "-" {
+		return ""
+	}
+	return s
 }
 
 // defaultDBPath suits running the CLI on a workstation; the container sets

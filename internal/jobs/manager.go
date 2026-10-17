@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -206,7 +205,7 @@ func (m *Manager) work(root context.Context, j Job) {
 	switch {
 	case root.Err() != nil && !byUser:
 		return // shutting down; the job is queued again on the next start
-	case byUser:
+	case byUser && err != nil: // a stop that came after the job finished leaves it done
 		err = m.SetStatus(bg, j.ID, Cancelled, "")
 	case err != nil:
 		slog.Warn("job failed", "id", j.ID, "url", j.URL, "err", err)
@@ -261,9 +260,7 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 			return err
 		}
 		items = resolve.Resolve(ctx, col.Tracks, d.Library, d.Search, d.Workers)
-		if col.Kind == spotify.KindAlbum {
-			kind = library.Album
-		}
+		kind = library.KindFor(col.Kind == spotify.KindAlbum)
 		if col.Kind == spotify.KindPlaylist {
 			list, name = &ref, col.Name
 		}
@@ -287,9 +284,9 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 		return err
 	}
 
-	set := func(pos int, status, path string, bytes int64, reason string) {
+	set := func(pos int, status TrackStatus, path string, bytes int64, reason string) {
 		if path != "" {
-			path = m.rel(path)
+			path = d.Layout.Rel(path)
 		}
 		if err := st.SetTrack(context.WithoutCancel(ctx), j.ID, pos, status, path, bytes, reason); err != nil {
 			slog.Error("recording a track", "job", j.ID, "pos", pos, "err", err)
@@ -307,19 +304,7 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 			if r.Item.Status != resolve.Need {
 				return
 			}
-			status, reason := TrackFailed, ""
-			switch {
-			case r.Outcome == download.Downloaded, r.Outcome == download.Exists && r.Err == nil:
-				status = TrackDone
-			case r.Outcome == download.NotStocked:
-				status = TrackNotStocked
-			case r.Outcome == download.LossyOnly:
-				status = TrackLossyOnly
-			case r.Err != nil && ctx.Err() != nil:
-				status = TrackPending // cut short, not failed
-			case r.Err != nil:
-				reason = r.Err.Error()
-			}
+			status, reason := trackStatus(r, ctx.Err() != nil)
 			set(posByISRC[r.Item.Track.ISRC], status, r.Path, r.Bytes, reason)
 		},
 	})
@@ -334,11 +319,22 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 	return ctx.Err()
 }
 
-func (m *Manager) rel(path string) string {
-	if r, err := filepath.Rel(m.deps.Layout.Root, path); err == nil {
-		return filepath.ToSlash(r)
+// trackStatus is how a download result shows on its track row. A failure that
+// came from the run being cancelled leaves the track pending.
+func trackStatus(r download.Result, cancelled bool) (status TrackStatus, reason string) {
+	switch {
+	case r.Outcome == download.Downloaded, r.Outcome == download.Exists:
+		return TrackDone, ""
+	case r.Outcome == download.NotStocked:
+		return TrackNotStocked, ""
+	case r.Outcome == download.LossyOnly:
+		return TrackLossyOnly, ""
+	case r.Err != nil && cancelled:
+		return TrackPending, ""
+	case r.Err != nil:
+		return TrackFailed, r.Err.Error()
 	}
-	return path
+	return TrackFailed, ""
 }
 
 func (m *Manager) row(pos int, it resolve.Item) Track {
@@ -350,7 +346,7 @@ func (m *Manager) row(pos int, it resolve.Item) Track {
 	case resolve.Need:
 		t.Status = TrackPending
 	case resolve.Have:
-		t.Status, t.Path = TrackHave, m.rel(it.Path)
+		t.Status, t.Path = TrackHave, m.deps.Layout.Rel(it.Path)
 	case resolve.NoMatch:
 		t.Status = TrackNoMatch
 	case resolve.Ambiguous:

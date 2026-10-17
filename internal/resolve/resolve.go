@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jigsmiths/dredge/internal/match"
+	"github.com/jigsmiths/dredge/internal/monochrome"
 	"github.com/jigsmiths/dredge/internal/pool"
 	"github.com/jigsmiths/dredge/internal/track"
 )
@@ -54,6 +55,10 @@ type Item struct {
 	Status Status
 	Path   string // the existing file, when Have
 	Reason string
+
+	// the catalogue's track for a Need item, when the search that matched it
+	// already found it; nil means download must look it up
+	Found *monochrome.Track
 }
 
 const searchLimit = 25
@@ -85,17 +90,8 @@ func Resolve(ctx context.Context, tracks []track.Track, lib Library, s Searcher,
 }
 
 func resolveOne(ctx context.Context, t track.Track, lib Library, s Searcher) (Item, error) {
-	if t.ISRC != "" {
-		if p, ok, err := lib.ByISRC(ctx, t.ISRC); err != nil {
-			return Item{}, err
-		} else if ok {
-			return Item{Track: t, Status: Have, Path: p, Reason: "same ISRC"}, nil
-		}
-	}
-	if p, ok, err := lib.ByMeta(ctx, t.Title, t.Artists); err != nil {
-		return Item{}, err
-	} else if ok {
-		return Item{Track: t, Status: Have, Path: p, Reason: "same title and artist"}, nil
+	if it, ok, err := inLibrary(ctx, t, lib); err != nil || ok {
+		return it, err
 	}
 
 	if len(t.Artists) == 0 || strings.TrimSpace(t.Artists[0]) == "" {
@@ -126,5 +122,10 @@ func resolveOne(ctx context.Context, t track.Track, lib Library, s Searcher) (It
 	} else if ok {
 		return Item{Track: t, Status: Have, Path: p, Reason: "same ISRC"}, nil
 	}
-	return Item{Track: t, Status: Need, Reason: m.Reason}, nil
+	it := Item{Track: t, Status: Need, Reason: m.Reason}
+	if m.Best.ID != "" {
+		found := monochrome.TrackFrom(m.Best)
+		it.Found = &found
+	}
+	return it, nil
 }
