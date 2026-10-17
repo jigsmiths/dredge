@@ -18,6 +18,7 @@ import (
 	"github.com/jigsmiths/dredge/internal/monochrome"
 	"github.com/jigsmiths/dredge/internal/pool"
 	"github.com/jigsmiths/dredge/internal/resolve"
+	"github.com/jigsmiths/dredge/internal/track"
 )
 
 type Source interface {
@@ -109,7 +110,12 @@ func Run(ctx context.Context, items []resolve.Item, src Source, rec Recorder, op
 			opt.Started(it)
 			progress.Unlock()
 		}
+		if it.Status == resolve.Need {
+			slog.Info("track started", "title", it.Track.Title, "artist", firstArtist(it.Track))
+		}
+		began := time.Now()
 		r := one(ctx, it, src, rec, opt, &place)
+		logResult(r, time.Since(began))
 		report(r)
 		return r, nil
 	})
@@ -118,10 +124,40 @@ func Run(ctx context.Context, items []resolve.Item, src Source, rec Recorder, op
 		out[i] = r.Value
 		if r.Err != nil { // never started: the context ended first
 			out[i] = Result{Item: items[i], Outcome: Failed, Err: r.Err}
+			logResult(out[i], 0)
 			report(out[i])
 		}
 	}
 	return out
+}
+
+func firstArtist(t track.Track) string {
+	if len(t.Artists) == 0 {
+		return ""
+	}
+	return t.Artists[0]
+}
+
+// logResult writes one line for a track's outcome, at Warn when it needs a look.
+func logResult(r Result, took time.Duration) {
+	t := r.Item.Track
+	args := []any{"title", t.Title, "artist", firstArtist(t), "outcome", r.Outcome.String()}
+	level := slog.LevelInfo
+	switch {
+	case r.Outcome == Skipped:
+		args = append(args, "status", r.Item.Status.String())
+		if r.Item.Reason != "" {
+			args = append(args, "reason", r.Item.Reason)
+		}
+	case r.Outcome == Failed || r.Err != nil:
+		level = slog.LevelWarn
+		args = append(args, "err", r.Err)
+	case r.Outcome == LossyOnly:
+		level = slog.LevelWarn
+	case r.Outcome == Downloaded:
+		args = append(args, "bytes", r.Bytes, "took", took.Round(time.Millisecond))
+	}
+	slog.Log(context.Background(), level, "track finished", args...)
 }
 
 func one(ctx context.Context, it resolve.Item, src Source, rec Recorder, opt Options, place *sync.Mutex) Result {
