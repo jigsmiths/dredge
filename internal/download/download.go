@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -214,6 +215,7 @@ func fetch(ctx context.Context, src Source, mono monochrome.Track, dir string, t
 		if ctx.Err() != nil || errors.Is(err, monochrome.ErrLossyOnly) {
 			break
 		}
+		slog.Warn("download attempt failed", "track", mono.ID, "attempt", n, "err", err)
 	}
 	return "", err
 }
