@@ -211,11 +211,24 @@ func (m *Manager) work(root context.Context, j Job) {
 		slog.Warn("job failed", "id", j.ID, "url", j.URL, "err", err)
 		err = m.SetStatus(bg, j.ID, Failed, err.Error())
 	default:
-		err = m.SetStatus(bg, j.ID, Done, "")
+		err = m.SetStatus(bg, j.ID, m.finishedStatus(bg, j.ID), "")
 	}
 	if err != nil {
 		slog.Error("recording a job's outcome", "id", j.ID, "err", err)
 	}
+}
+
+// finishedStatus is Partial when any track failed, otherwise Done.
+func (m *Manager) finishedStatus(ctx context.Context, id int64) Status {
+	j, err := m.Get(ctx, id)
+	if err != nil {
+		slog.Error("counting failed tracks", "id", id, "err", err)
+		return Done
+	}
+	if j.Counts[TrackFailed] > 0 {
+		return Partial
+	}
+	return Done
 }
 
 func (m *Manager) process(ctx context.Context, j Job) error {
@@ -259,7 +272,14 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 		if err := st.SetCollection(ctx, j.ID, string(col.Kind), col.Name); err != nil {
 			return err
 		}
-		items = resolve.Resolve(ctx, col.Tracks, d.Library, d.Search, d.Workers)
+		if err := st.ReplaceTracks(ctx, j.ID, nil); err != nil {
+			return err
+		}
+		items = resolve.Resolve(ctx, col.Tracks, d.Library, d.Search, d.Workers, func(it resolve.Item) {
+			if err := st.PutTrack(context.WithoutCancel(ctx), j.ID, m.row(it)); err != nil {
+				slog.Error("recording a track", "job", j.ID, "pos", it.Pos, "err", err)
+			}
+		})
 		kind = library.KindFor(col.Kind == spotify.KindAlbum)
 		if col.Kind == spotify.KindPlaylist {
 			list, name = &ref, col.Name
@@ -270,12 +290,8 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 	}
 
 	rows := make([]Track, len(items))
-	posByISRC := map[string]int{}
 	for i, it := range items {
-		rows[i] = m.row(i, it)
-		if it.Status == resolve.Need {
-			posByISRC[it.Track.ISRC] = i
-		}
+		rows[i] = m.row(it)
 	}
 	if err := st.ReplaceTracks(ctx, j.ID, rows); err != nil {
 		return err
@@ -294,10 +310,10 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 	}
 	results := download.Run(ctx, items, d.Source, d.Library, download.Options{
 		Layout: d.Layout, Kind: kind, Workers: d.Workers, Attempts: d.Attempts, Backoff: d.Backoff,
-		Started: func(it resolve.Item) { set(posByISRC[it.Track.ISRC], TrackDownloading, "", 0, "") },
+		Started: func(it resolve.Item) { set(it.Pos, TrackDownloading, "", 0, "") },
 		Bytes: func(it resolve.Item, done, total int64) {
 			m.mu.Lock()
-			m.live[posByISRC[it.Track.ISRC]] = progress{done, total}
+			m.live[it.Pos] = progress{done, total}
 			m.mu.Unlock()
 		},
 		Progress: func(r download.Result) {
@@ -305,7 +321,7 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 				return
 			}
 			status, reason := trackStatus(r, ctx.Err() != nil)
-			set(posByISRC[r.Item.Track.ISRC], status, r.Path, r.Bytes, reason)
+			set(r.Item.Pos, status, r.Path, r.Bytes, reason)
 		},
 	})
 
@@ -337,9 +353,9 @@ func trackStatus(r download.Result, cancelled bool) (status TrackStatus, reason 
 	return TrackFailed, ""
 }
 
-func (m *Manager) row(pos int, it resolve.Item) Track {
+func (m *Manager) row(it resolve.Item) Track {
 	t := Track{
-		Pos: pos, Title: it.Track.Title, Artists: it.Track.Artists, Album: it.Track.Album,
+		Pos: it.Pos, Title: it.Track.Title, Artists: it.Track.Artists, Album: it.Track.Album,
 		ISRC: it.Track.ISRC, Reason: it.Reason,
 	}
 	switch it.Status {

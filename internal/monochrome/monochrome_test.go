@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jigsmiths/dredge/internal/httpretry"
 )
 
 func fixture(t *testing.T, name string) string {
@@ -28,15 +30,17 @@ type fake struct {
 	t   *testing.T
 	srv *httptest.Server
 
-	mu        sync.Mutex
-	pageHits  int
-	searches  []string
-	statuses  []int // consumed one per search request, then 200
-	search    func(q string) string
-	track     func(w http.ResponseWriter, r *http.Request)
-	release   func(w http.ResponseWriter, r *http.Request)
-	webBroken bool
-	apiPrefix string
+	mu         sync.Mutex
+	pageHits   int
+	searches   []string
+	statuses   []int // consumed one per search request, then 200
+	resets     int   // search requests to drop the connection on, before statuses
+	retryAfter string
+	search     func(q string) string
+	track      func(w http.ResponseWriter, r *http.Request)
+	release    func(w http.ResponseWriter, r *http.Request)
+	webBroken  bool
+	apiPrefix  string
 }
 
 func newFake(t *testing.T) *fake {
@@ -67,8 +71,22 @@ func newFake(t *testing.T) *fake {
 		if len(f.statuses) > 0 {
 			status, f.statuses = f.statuses[0], f.statuses[1:]
 		}
+		reset := f.resets > 0
+		if reset {
+			f.resets--
+		}
 		f.mu.Unlock()
+		if reset {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = conn.Close()
+			}
+			return
+		}
 		if status != 200 {
+			if f.retryAfter != "" {
+				w.Header().Set("Retry-After", f.retryAfter)
+			}
 			w.WriteHeader(status)
 			return
 		}
@@ -215,6 +233,59 @@ func TestGatewayErrorsAreRetried(t *testing.T) {
 	f.statuses = []int{502, 503}
 	if _, err := f.client().Find(context.Background(), "USSM10009075", "Heart", "Barracuda"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestADroppedConnectionIsRetried(t *testing.T) {
+	f := newFake(t)
+	f.resets = 2
+	if _, err := f.client().Find(context.Background(), "USSM10009075", "Heart", "Barracuda"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTooManyRequestsWaitsForRetryAfter(t *testing.T) {
+	f := newFake(t)
+	f.statuses = []int{429}
+	f.retryAfter = "2"
+	c := f.client()
+	var waits []time.Duration
+	c.sleep = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	if _, err := c.Find(context.Background(), "USSM10009075", "Heart", "Barracuda"); err != nil {
+		t.Fatal(err)
+	}
+	if len(waits) != 1 || waits[0] != 2*time.Second {
+		t.Errorf("waits = %v, want one of 2s", waits)
+	}
+}
+
+func TestRetryAfterIsCapped(t *testing.T) {
+	f := newFake(t)
+	f.statuses = []int{429}
+	f.retryAfter = "3600"
+	c := f.client()
+	var waits []time.Duration
+	c.sleep = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	if _, err := c.Find(context.Background(), "USSM10009075", "Heart", "Barracuda"); err != nil {
+		t.Fatal(err)
+	}
+	if len(waits) != 1 || waits[0] > httpretry.MaxWait {
+		t.Errorf("waits = %v, want at most %v", waits, httpretry.MaxWait)
+	}
+}
+
+func TestACancelledRequestIsNotRetried(t *testing.T) {
+	f := newFake(t)
+	f.resets = 10
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := f.client().Search(ctx, "x", 5); err == nil {
+		t.Fatal("want an error")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.searches) > 1 {
+		t.Errorf("%d requests after cancel, want no retries", len(f.searches))
 	}
 }
 

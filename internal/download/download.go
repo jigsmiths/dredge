@@ -16,6 +16,7 @@ import (
 
 	"github.com/jigsmiths/dredge/internal/flacmeta"
 	"github.com/jigsmiths/dredge/internal/library"
+	"github.com/jigsmiths/dredge/internal/match"
 	"github.com/jigsmiths/dredge/internal/monochrome"
 	"github.com/jigsmiths/dredge/internal/pool"
 	"github.com/jigsmiths/dredge/internal/resolve"
@@ -186,7 +187,10 @@ func one(ctx context.Context, it resolve.Item, src Source, rec Recorder, opt Opt
 			return fail("find: %w", err)
 		}
 	}
-	cover, _ := src.Artwork(ctx, mono) // a missing cover is not worth failing for
+	cover, err := src.Artwork(ctx, mono) // a missing cover is not worth failing for
+	if err != nil && ctx.Err() == nil {
+		slog.Warn("no cover art", "title", it.Track.Title, "err", err)
+	}
 
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fail("%w", err)
@@ -195,7 +199,11 @@ func one(ctx context.Context, it resolve.Item, src Source, rec Recorder, opt Opt
 	if opt.Bytes != nil {
 		fctx = monochrome.WithProgress(ctx, func(done, total int64) { opt.Bytes(it, done, total) })
 	}
-	tmp, err := fetch(fctx, src, mono, filepath.Dir(dst), tagsFor(it, cover), opt)
+	wantMS := it.Track.DurationMS
+	if wantMS == 0 {
+		wantMS = mono.DurationMS
+	}
+	tmp, err := fetch(fctx, src, mono, filepath.Dir(dst), tagsFor(it, cover), wantMS, opt)
 	if errors.Is(err, monochrome.ErrLossyOnly) {
 		return Result{Item: it, Outcome: LossyOnly}
 	}
@@ -239,7 +247,7 @@ func one(ctx context.Context, it resolve.Item, src Source, rec Recorder, opt Opt
 // fetch downloads into a temp file in dir and returns its path. A transient
 // failure, such as the stream errors a long download can hit, is retried from
 // the start with a growing wait; a cancelled run is not.
-func fetch(ctx context.Context, src Source, mono monochrome.Track, dir string, tags flacmeta.Tags, opt Options) (string, error) {
+func fetch(ctx context.Context, src Source, mono monochrome.Track, dir string, tags flacmeta.Tags, wantMS int, opt Options) (string, error) {
 	var err error
 	for n := 1; n <= opt.attempts(); n++ {
 		if n > 1 {
@@ -248,10 +256,10 @@ func fetch(ctx context.Context, src Source, mono monochrome.Track, dir string, t
 			}
 		}
 		var name string
-		if name, err = fetchOnce(ctx, src, mono, dir, tags); err == nil {
+		if name, err = fetchOnce(ctx, src, mono, dir, tags, wantMS); err == nil {
 			return name, nil
 		}
-		if ctx.Err() != nil || errors.Is(err, monochrome.ErrLossyOnly) {
+		if ctx.Err() != nil || errors.Is(err, monochrome.ErrLossyOnly) || errors.Is(err, errWrongLength) {
 			break
 		}
 		slog.Warn("download attempt failed", "track", mono.ID, "attempt", n, "err", err)
@@ -259,7 +267,10 @@ func fetch(ctx context.Context, src Source, mono monochrome.Track, dir string, t
 	return "", err
 }
 
-func fetchOnce(ctx context.Context, src Source, mono monochrome.Track, dir string, tags flacmeta.Tags) (name string, err error) {
+// errWrongLength is not retried: another try fetches the same file.
+var errWrongLength = errors.New("the file is not the recording that was matched")
+
+func fetchOnce(ctx context.Context, src Source, mono monochrome.Track, dir string, tags flacmeta.Tags, wantMS int) (name string, err error) {
 	tmp, err := os.CreateTemp(dir, ".dredge-*.part")
 	if err != nil {
 		return "", err
@@ -282,7 +293,39 @@ func fetchOnce(ctx context.Context, src Source, mono monochrome.Track, dir strin
 	if err = tmp.Close(); err != nil {
 		return "", err
 	}
+	if err = checkLength(tmp.Name(), wantMS); err != nil {
+		return "", err
+	}
 	return tmp.Name(), nil
+}
+
+// checkLength fails a file whose length is outside the match tolerance of wantMS.
+func checkLength(path string, wantMS int) error {
+	if wantMS <= 0 {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	gotMS, err := flacmeta.DurationMS(f)
+	if err != nil {
+		return err
+	}
+	if gotMS == 0 || abs(gotMS-wantMS) <= match.DurationToleranceMS {
+		return nil
+	}
+	return fmt.Errorf("%w: it is %s long, wanted %s", errWrongLength,
+		(time.Duration(gotMS) * time.Millisecond).Round(time.Second),
+		(time.Duration(wantMS) * time.Millisecond).Round(time.Second))
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 func wait(ctx context.Context, d time.Duration) error {

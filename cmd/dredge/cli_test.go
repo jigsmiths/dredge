@@ -73,7 +73,7 @@ func (s *fakeSource) Download(ctx context.Context, t monochrome.Track, w io.Writ
 		return 0, err
 	}
 	b := append([]byte("fLaC"), 0x80, 0, 0, 34)
-	b = append(b, bytes.Repeat([]byte{9}, 34)...)
+	b = append(b, make([]byte, 34)...) // a STREAMINFO that declares no length
 	b = append(b, "AUDIO"...)
 	_, err := w.Write(b)
 	return int64(len(b)), err
