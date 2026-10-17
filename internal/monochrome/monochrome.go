@@ -383,15 +383,15 @@ func ReportProgress(ctx context.Context, done, total int64) {
 }
 
 type countReader struct {
+	ctx         context.Context
 	r           io.Reader
 	done, total int64
-	f           func(done, total int64)
 }
 
 func (c *countReader) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
 	c.done += int64(n)
-	c.f(c.done, c.total)
+	ReportProgress(c.ctx, c.done, c.total)
 	return n, err
 }
 
@@ -427,13 +427,13 @@ func (c *Client) Download(ctx context.Context, t Track, w io.Writer) (int64, err
 		return 0, causeOr(ctx, errors.New("monochrome: download is not a FLAC file"))
 	}
 	total := resp.ContentLength
-	progress, _ := ctx.Value(progressKey{}).(func(done, total int64))
+	_, counting := ctx.Value(progressKey{}).(func(done, total int64))
 	var n int64
 	for resumes := 0; ; resumes++ {
 		rd := &errReader{r: br}
 		var src io.Reader = rd
-		if progress != nil {
-			src = &countReader{r: rd, done: n, total: total, f: progress}
+		if counting {
+			src = &countReader{ctx: ctx, r: rd, done: n, total: total}
 		}
 		m, err := io.Copy(w, src)
 		n += m

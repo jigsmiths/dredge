@@ -277,23 +277,6 @@
     width: 100%;
     height: 6px;
   }
-  .chip {
-    font-size: 0.75rem;
-    padding: 0.1rem 0.5rem;
-    border-radius: 99px;
-    background: #333;
-    align-self: center;
-  }
-  .chip.running,
-  .chip.resolving {
-    background: #1d5a8a;
-  }
-  .chip.done {
-    background: #236b45;
-  }
-  .chip.failed {
-    background: #8a2d3b;
-  }
   .error {
     color: #cf6679;
   }

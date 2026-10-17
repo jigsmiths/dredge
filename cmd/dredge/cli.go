@@ -46,9 +46,7 @@ func parseFlags(name string, e *env, args []string) (*options, error) {
 		o.args = append(o.args, fs.Arg(0))
 		args = fs.Args()[1:]
 	}
-	if o.cfg.SinglesDir == "-" {
-		o.cfg.SinglesDir = ""
-	}
+	o.cfg.SinglesDir = config.SinglesDir(o.cfg.SinglesDir)
 	if o.cfg.Workers < 1 {
 		return nil, usageError{"--workers must be at least 1"}
 	}
@@ -131,7 +129,7 @@ type session struct {
 }
 
 func resolveCommand(ctx context.Context, e *env, args []string) error {
-	_, closeFn, err := prepare(ctx, e, "resolve", args)
+	_, closeFn, err := prepare(ctx, e, "resolve", false, args)
 	if err != nil {
 		return err
 	}
@@ -140,7 +138,7 @@ func resolveCommand(ctx context.Context, e *env, args []string) error {
 }
 
 func getCommand(ctx context.Context, e *env, args []string) error {
-	s, closeFn, err := prepare(ctx, e, "get", args)
+	s, closeFn, err := prepare(ctx, e, "get", true, args)
 	if err != nil {
 		return err
 	}
@@ -149,8 +147,8 @@ func getCommand(ctx context.Context, e *env, args []string) error {
 }
 
 // prepare parses the command line, resolves the link against the library and
-// lists the result.
-func prepare(ctx context.Context, e *env, command string, args []string) (*session, func(), error) {
+// lists the result. It insists on an existing music dir when it will download.
+func prepare(ctx context.Context, e *env, command string, download bool, args []string) (*session, func(), error) {
 	o, err := parseFlags(command, e, args)
 	if err != nil {
 		return nil, nil, err
@@ -159,7 +157,7 @@ func prepare(ctx context.Context, e *env, command string, args []string) (*sessi
 	if err != nil {
 		return nil, nil, err
 	}
-	if command == "get" {
+	if download {
 		if err := requireMusicDir(o.cfg.MusicDir); err != nil {
 			return nil, nil, err
 		}
@@ -237,10 +235,7 @@ func (s *session) get(ctx context.Context, e *env) error {
 			need++
 		}
 	}
-	kind := library.Single
-	if s.col.Kind == spotify.KindAlbum {
-		kind = library.Album
-	}
+	kind := library.KindFor(s.col.Kind == spotify.KindAlbum)
 
 	var results []download.Result
 	if need == 0 {

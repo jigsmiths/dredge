@@ -156,6 +156,10 @@ func (a artistList) names() []string {
 	return out
 }
 
+type isoDate struct {
+	ISOString string `json:"isoString"`
+}
+
 type duration struct {
 	TotalMilliseconds int `json:"totalMilliseconds"`
 }
@@ -170,10 +174,8 @@ type trackData struct {
 	Duration      duration   `json:"duration"`
 	Artists       artistList `json:"artists"`
 	AlbumOfTrack  struct {
-		Name string `json:"name"`
-		Date struct {
-			ISOString string `json:"isoString"`
-		} `json:"date"`
+		Name    string     `json:"name"`
+		Date    isoDate    `json:"date"`
 		Artists artistList `json:"artists"`
 	} `json:"albumOfTrack"`
 }
@@ -261,10 +263,8 @@ func (c *Client) album(ctx context.Context, ref Ref) (*Collection, error) {
 		var resp struct {
 			Data struct {
 				AlbumUnion *struct {
-					Name string `json:"name"`
-					Date struct {
-						ISOString string `json:"isoString"`
-					} `json:"date"`
+					Name     string     `json:"name"`
+					Date     isoDate    `json:"date"`
 					Artists  artistList `json:"artists"`
 					TracksV2 struct {
 						TotalCount int `json:"totalCount"`

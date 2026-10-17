@@ -205,7 +205,7 @@ func (m *Manager) work(root context.Context, j Job) {
 	switch {
 	case root.Err() != nil && !byUser:
 		return // shutting down; the job is queued again on the next start
-	case byUser:
+	case byUser && err != nil: // a stop that came after the job finished leaves it done
 		err = m.SetStatus(bg, j.ID, Cancelled, "")
 	case err != nil:
 		slog.Warn("job failed", "id", j.ID, "url", j.URL, "err", err)
@@ -260,9 +260,7 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 			return err
 		}
 		items = resolve.Resolve(ctx, col.Tracks, d.Library, d.Search, d.Workers)
-		if col.Kind == spotify.KindAlbum {
-			kind = library.Album
-		}
+		kind = library.KindFor(col.Kind == spotify.KindAlbum)
 		if col.Kind == spotify.KindPlaylist {
 			list, name = &ref, col.Name
 		}

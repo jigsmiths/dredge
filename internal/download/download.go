@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -169,8 +170,8 @@ func one(ctx context.Context, it resolve.Item, src Source, rec Recorder, opt Opt
 	}
 
 	dst := opt.Layout.Path(opt.Kind, it.Track)
-	if exists(dst) {
-		return Result{Item: it, Outcome: Exists, Path: dst}
+	if library.Exists(dst) {
+		return taken(it, dst)
 	}
 	var mono monochrome.Track
 	if it.Found != nil {
@@ -209,9 +210,9 @@ func one(ctx context.Context, it resolve.Item, src Source, rec Recorder, opt Opt
 	}()
 
 	place.Lock()
-	if exists(dst) {
+	if library.Exists(dst) {
 		place.Unlock()
-		return Result{Item: it, Outcome: Exists, Path: dst}
+		return taken(it, dst)
 	}
 	err = os.Rename(tmp, dst)
 	place.Unlock()
@@ -298,9 +299,28 @@ func wait(ctx context.Context, d time.Duration) error {
 	}
 }
 
-func exists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+// taken is the result for a file already at dst: Exists, unless the file is
+// tagged as another recording that happens to share the name.
+func taken(it resolve.Item, dst string) Result {
+	if other := otherISRC(dst, it.Track.ISRC); other != "" {
+		return Result{Item: it, Outcome: Failed, Err: fmt.Errorf("a different recording (%s) is already at %s", other, dst)}
+	}
+	return Result{Item: it, Outcome: Exists, Path: dst}
+}
+
+// otherISRC is the ISRC the file at path is tagged with when it differs from
+// isrc, and empty when it matches or cannot be told.
+func otherISRC(path, isrc string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = f.Close() }()
+	t, err := flacmeta.Read(f)
+	if err != nil || t.ISRC == "" || isrc == "" || strings.EqualFold(t.ISRC, isrc) {
+		return ""
+	}
+	return t.ISRC
 }
 
 func tagsFor(it resolve.Item, cover []byte) flacmeta.Tags {

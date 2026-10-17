@@ -125,6 +125,29 @@ func files(t *testing.T, root string) []string {
 	return out
 }
 
+func TestADifferentRecordingAtThePathIsAFailureNotExists(t *testing.T) {
+	opt, root := setup(t)
+	dst := filepath.Join(root, "Singles", "Heart", "Barracuda.flac")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var tagged bytes.Buffer
+	if err := flacmeta.Rewrite(bytes.NewReader(flacFile()), &tagged, flacmeta.Tags{Title: "Barracuda", ISRC: "OTHER0000001"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, tagged.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := &fakeSource{stocked: map[string]bool{"USSM10009075": true}}
+	res := Run(context.Background(), []resolve.Item{need("USSM10009075", "Barracuda", "Heart")}, src, &fakeRecorder{}, opt)
+	if res[0].Outcome != Failed || res[0].Err == nil {
+		t.Fatalf("result = %+v, want a failure naming the other recording", res[0])
+	}
+	if b, _ := os.ReadFile(dst); !bytes.Equal(b, tagged.Bytes()) {
+		t.Error("the existing file was changed")
+	}
+}
+
 func TestAFoundTrackIsDownloadedWithoutSearchingAgain(t *testing.T) {
 	opt, root := setup(t)
 	src := &fakeSource{findErr: errors.New("Find must not be called")}
@@ -362,7 +385,7 @@ func TestTwoRecordingsWithTheSamePathDoNotClobberEachOther(t *testing.T) {
 	for _, r := range res {
 		outcomes[r.Outcome]++
 	}
-	if outcomes[Downloaded] != 1 || outcomes[Exists] != 1 || len(files(t, root)) != 1 {
+	if outcomes[Downloaded] != 1 || outcomes[Failed] != 1 || len(files(t, root)) != 1 {
 		t.Errorf("outcomes = %v, files = %v", outcomes, files(t, root))
 	}
 }

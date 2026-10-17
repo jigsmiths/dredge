@@ -35,6 +35,15 @@ const (
 	Album
 )
 
+// KindFor is how a download is filed: a whole album under its album, anything
+// else as a single.
+func KindFor(album bool) Kind {
+	if album {
+		return Album
+	}
+	return Single
+}
+
 // Layout is where the library lives. SinglesDir is relative to Root; empty
 // files singles straight under Root.
 type Layout struct {
@@ -192,7 +201,8 @@ func (x *Index) Add(ctx context.Context, e Entry) error {
 	return x.put(ctx, e, fi.ModTime().UnixNano(), fi.Size())
 }
 
-func exists(path string) bool {
+// Exists reports whether something is at path.
+func Exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
@@ -227,7 +237,7 @@ func (x *Index) ByISRC(ctx context.Context, isrc string) (string, bool, error) {
 		return "", false, err
 	}
 	for _, r := range rs {
-		if exists(r.path) {
+		if Exists(r.path) {
 			return r.path, true, nil
 		}
 	}
@@ -247,7 +257,7 @@ func (x *Index) ByMeta(ctx context.Context, title string, artists []string) (str
 	}
 	for _, r := range rs {
 		for _, w := range wanted {
-			if strings.Contains(r.artists, "|"+w+"|") && exists(r.path) {
+			if strings.Contains(r.artists, "|"+w+"|") && Exists(r.path) {
 				return r.path, true, nil
 			}
 		}
