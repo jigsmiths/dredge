@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -26,6 +27,7 @@ const (
 	defaultWeb   = "https://monochrome.st"
 	discoveryTTL = 6 * time.Hour
 	maxAttempts  = 3
+	maxResumes   = 5
 	maxPage      = 16 << 20
 	maxArtwork   = 8 << 20
 	stallTimeout = time.Minute
@@ -378,12 +380,8 @@ func (c *Client) Download(ctx context.Context, t Track, w io.Writer) (int64, err
 	}
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/track/"+url.PathEscape(t.ID), nil)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("User-Agent", userAgent)
-	resp, err := c.http.Do(req)
+	u := base + "/track/" + url.PathEscape(t.ID)
+	resp, err := c.open(ctx, u, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -404,18 +402,83 @@ func (c *Client) Download(ctx context.Context, t Track, w io.Writer) (int64, err
 		}
 		return 0, causeOr(ctx, errors.New("monochrome: download is not a FLAC file"))
 	}
-	var src io.Reader = br
-	if f, ok := ctx.Value(progressKey{}).(func(done, total int64)); ok {
-		src = &countReader{r: br, total: resp.ContentLength, f: f}
+	total := resp.ContentLength
+	progress, _ := ctx.Value(progressKey{}).(func(done, total int64))
+	var n int64
+	for resumes := 0; ; resumes++ {
+		rd := &errReader{r: br}
+		var src io.Reader = rd
+		if progress != nil {
+			src = &countReader{r: rd, done: n, total: total, f: progress}
+		}
+		m, err := io.Copy(w, src)
+		n += m
+		if err == nil {
+			break
+		}
+		// only a failed read is worth resuming, not a write the tagger refused
+		if rd.err == nil || ctx.Err() != nil || total < 0 || resumes >= maxResumes {
+			return n, causeOr(ctx, err)
+		}
+		slog.Warn("download interrupted, resuming", "track", t.ID, "at", n, "of", total, "err", err)
+		next, rerr := c.open(ctx, u, n)
+		if rerr == nil && !resumedAt(next, n) {
+			_ = next.Body.Close()
+			rerr = fmt.Errorf("monochrome: download: server did not resume at byte %d (HTTP %d)", n, next.StatusCode)
+		}
+		if rerr != nil {
+			return n, fmt.Errorf("%w (resume failed: %w)", err, rerr)
+		}
+		_ = resp.Body.Close()
+		resp = next
+		body.r = resp.Body
+		br = bufio.NewReader(body)
 	}
-	n, err := io.Copy(w, src)
-	if err != nil {
-		return n, causeOr(ctx, err)
-	}
-	if resp.ContentLength >= 0 && n != resp.ContentLength {
-		return n, fmt.Errorf("monochrome: download ended after %d of %d bytes", n, resp.ContentLength)
+	if total >= 0 && n != total {
+		return n, fmt.Errorf("monochrome: download ended after %d of %d bytes", n, total)
 	}
 	return n, nil
+}
+
+// open starts a download at byte from, or the beginning if it is 0.
+func (c *Client) open(ctx context.Context, u string, from int64) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", userAgent)
+	if from > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", from))
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if from == 0 && resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("monochrome: download: HTTP %d", resp.StatusCode)
+	}
+	return resp, nil
+}
+
+// resumedAt reports whether resp is a partial response that starts at byte from.
+func resumedAt(resp *http.Response, from int64) bool {
+	return resp.StatusCode == http.StatusPartialContent &&
+		strings.HasPrefix(resp.Header.Get("Content-Range"), fmt.Sprintf("bytes %d-", from))
+}
+
+// errReader remembers whether a failure came from reading.
+type errReader struct {
+	r   io.Reader
+	err error
+}
+
+func (e *errReader) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
+	if err != nil && err != io.EOF {
+		e.err = err
+	}
+	return n, err
 }
 
 func causeOr(ctx context.Context, err error) error {
