@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/grafana/pyroscope-go"
+	"github.com/jigsmiths/dredge/internal/deezer"
 	"github.com/jigsmiths/dredge/internal/jobs"
 	"github.com/jigsmiths/dredge/internal/library"
 	"github.com/jigsmiths/dredge/internal/server"
@@ -54,6 +55,7 @@ func serve(ctx context.Context, e *env) error {
 	layout := library.Layout{Root: cfg.MusicDir, SinglesDir: cfg.SinglesDir}
 	mgr := jobs.NewManager(jobs.NewStore(d.conn), jobs.Deps{
 		Spotify: d.spotify, Search: d.search, Source: d.source, Library: d.index, Details: d.details,
+		Lookup: deezer.New("", nil),
 		Layout: layout, Workers: cfg.Workers, WantEvery: cfg.WantEvery,
 	})
 	runCtx, stopJobs := context.WithCancel(ctx)

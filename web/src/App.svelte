@@ -71,9 +71,10 @@
         hits = await api.search(text);
         searched = text;
         error = "";
-        // "song by artist" splits into the two fields; otherwise the artist is left to fill in
+        // "song by artist" or "artist - song" splits into the two fields; otherwise the artist is left to fill in
         const by = text.match(/^(.+?)\s+by\s+(.+)$/i);
-        [wantTitle, wantArtist] = by ? [by[1], by[2]] : [text, ""];
+        const dash = text.match(/^(.+?)\s+[-–]\s+(.+)$/);
+        [wantTitle, wantArtist] = by ? [by[1], by[2]] : dash ? [dash[2], dash[1]] : [text, ""];
       }
     } catch (e) {
       fail(e);

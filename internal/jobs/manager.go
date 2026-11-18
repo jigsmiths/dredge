@@ -37,6 +37,7 @@ type Deps struct {
 	Source   download.Source
 	Library  Library
 	Details  resolve.Detailer // optional: albums for tracks picked from search
+	Lookup   Lookup           // optional: fills in a song wanted by name
 	Layout   library.Layout
 	Workers  int
 	Attempts int
@@ -45,6 +46,11 @@ type Deps struct {
 
 	// how long a wanted track waits between looks; zero looks only when asked
 	WantEvery time.Duration
+}
+
+// Lookup finds a song in another catalogue, to learn its length and ISRC.
+type Lookup interface {
+	Lookup(ctx context.Context, t track.Track) (track.Track, bool, error)
 }
 
 // Manager owns the queue. Jobs run one at a time, each with Workers tracks in
@@ -95,7 +101,15 @@ func (m *Manager) Want(ctx context.Context, title string, artists []string) erro
 	if title == "" || len(names) == 0 {
 		return fmt.Errorf("%w: a title and an artist are needed", ErrInvalid)
 	}
-	return m.AddWanted(ctx, track.Track{Title: title, Artists: names}, "added by name")
+	t := track.Track{Title: title, Artists: names}
+	if m.deps.Lookup != nil {
+		if found, ok, err := m.deps.Lookup.Lookup(ctx, t); err != nil {
+			slog.Warn("looking up a wanted track", "title", title, "err", err)
+		} else if ok {
+			t = found
+		}
+	}
+	return m.AddWanted(ctx, t, "added by name")
 }
 
 // CheckWanted has Run look for every wanted track again, between jobs.

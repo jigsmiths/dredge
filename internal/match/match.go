@@ -79,9 +79,17 @@ type scored struct {
 // Catalogues list one recording under several ISRCs, one per re-release, so
 // candidates with the same title and artist and about the same length count
 // as one recording; only a track of unknown length can be ambiguous.
+// A candidate with the wanted track's own ISRC is taken outright.
 func Pick(want track.Track, cands []Candidate) Result {
 	title := track.NormTitle(want.Title)
 	artists := track.NormArtists(want.Artists)
+	if want.ISRC != "" {
+		for _, c := range cands {
+			if c.ISRC == want.ISRC && sharesArtist(artists, c.Artists) {
+				return Result{Outcome: Matched, Best: c, Reason: "same ISRC"}
+			}
+		}
+	}
 
 	collect := func(sameTitle func(string) bool) []scored {
 		var ok []scored

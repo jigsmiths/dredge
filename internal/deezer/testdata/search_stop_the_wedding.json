@@ -1,0 +1,85 @@
+{
+  "data": [
+    {
+      "id": 4209416002,
+      "title": "Stop The Wedding!",
+      "title_short": "Stop The Wedding!",
+      "title_version": "",
+      "isrc": "USAT22604492",
+      "duration": 198,
+      "artist": {
+        "id": 1267252,
+        "name": "Ashe"
+      },
+      "album": {
+        "id": 1048456122,
+        "title": "Stop The Wedding!"
+      }
+    },
+    {
+      "id": 4366196201,
+      "title": "Stop The Wedding! (Original Piano Demo)",
+      "title_short": "Stop The Wedding! (Original Piano Demo)",
+      "title_version": "",
+      "isrc": "USAT22607425",
+      "duration": 198,
+      "artist": {
+        "id": 1267252,
+        "name": "Ashe"
+      },
+      "album": {
+        "id": 1128588271,
+        "title": "Stop The Wedding! (Original Piano Demo)"
+      }
+    },
+    {
+      "id": 4359044462,
+      "title": "Stop The Wedding! (Originally Performed by Ashe) (Piano Karaoke Version)",
+      "title_short": "Stop The Wedding! (Originally Performed by Ashe)",
+      "title_version": "(Piano Karaoke Version)",
+      "isrc": "AURFF2604612",
+      "duration": 213,
+      "artist": {
+        "id": 5404994,
+        "name": "Sing2Piano"
+      },
+      "album": {
+        "id": 1126069732,
+        "title": "Stop The Wedding! (Originally Performed by Ashe) (Piano Karaoke Version)"
+      }
+    },
+    {
+      "id": 4407257611,
+      "title": "Stop The Wedding! (Originally Performed by Ashe) (Karaoke Instrumental)",
+      "title_short": "Stop The Wedding! (Originally Performed by Ashe)",
+      "title_version": "(Karaoke Instrumental)",
+      "isrc": "GBRBE2610574",
+      "duration": 191,
+      "artist": {
+        "id": 9777878,
+        "name": "Hit The Button Karaoke"
+      },
+      "album": {
+        "id": 1144182521,
+        "title": "Hot Karaoke Instrumentals (Vol.13)"
+      }
+    },
+    {
+      "id": 4341937952,
+      "title": "Stop The Wedding! (Originally Performed by Ashe) (Karaoke Version)",
+      "title_short": "Stop The Wedding! (Originally Performed by Ashe)",
+      "title_version": "(Karaoke Version)",
+      "isrc": "AURFF2604607",
+      "duration": 199,
+      "artist": {
+        "id": 140607312,
+        "name": "karaoke SESH"
+      },
+      "album": {
+        "id": 1119273212,
+        "title": "Stop The Wedding! (Originally Performed by Ashe) (Karaoke Version)"
+      }
+    }
+  ],
+  "total": 7
+}
