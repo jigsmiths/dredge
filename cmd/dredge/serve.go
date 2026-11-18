@@ -54,7 +54,7 @@ func serve(ctx context.Context, e *env) error {
 	layout := library.Layout{Root: cfg.MusicDir, SinglesDir: cfg.SinglesDir}
 	mgr := jobs.NewManager(jobs.NewStore(d.conn), jobs.Deps{
 		Spotify: d.spotify, Search: d.search, Source: d.source, Library: d.index, Details: d.details,
-		Layout: layout, Workers: cfg.Workers,
+		Layout: layout, Workers: cfg.Workers, WantEvery: cfg.WantEvery,
 	})
 	runCtx, stopJobs := context.WithCancel(ctx)
 	jobsDone := make(chan struct{})

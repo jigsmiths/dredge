@@ -46,6 +46,8 @@ func fail(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, jobs.ErrNotFound):
 		writeError(w, http.StatusNotFound, "job not found")
+	case errors.Is(err, jobs.ErrWantedNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, jobs.ErrConflict):
 		writeError(w, http.StatusConflict, "the job is not in a state that allows that")
 	case errors.Is(err, jobs.ErrInvalid):
@@ -77,8 +79,56 @@ func (a *api) routes(r chi.Router) {
 		r.Post("/retry", a.retry)
 		r.Post("/cancel", a.cancel)
 	})
+	r.Get("/wanted", a.wanted)
+	r.Post("/wanted", a.want)
+	r.Post("/wanted/check", a.checkWanted)
+	r.Delete("/wanted/{id}", a.unwant)
 	r.Get("/search", a.search)
 	r.Post("/scan", a.scan)
+}
+
+func (a *api) wanted(w http.ResponseWriter, r *http.Request) {
+	ws, err := a.Jobs.ListWanted(r.Context())
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, ws)
+}
+
+func (a *api) want(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Title   string   `json:"title"`
+		Artists []string `json:"artists"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, `expected {"title", "artists"}`)
+		return
+	}
+	if err := a.Jobs.Want(r.Context(), body.Title, body.Artists); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (a *api) checkWanted(w http.ResponseWriter, _ *http.Request) {
+	a.Jobs.CheckWanted()
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (a *api) unwant(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err == nil {
+		err = a.Jobs.DeleteWanted(r.Context(), id)
+	} else {
+		err = jobs.ErrWantedNotFound
+	}
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func jobID(w http.ResponseWriter, r *http.Request) (int64, bool) {

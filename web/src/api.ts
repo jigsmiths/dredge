@@ -28,7 +28,18 @@ export type Track = {
 
 export type JobDetail = Job & { tracks: Track[] };
 
-export type Hit = { isrc: string; title: string; artists: string[]; duration_ms: number };
+export type Wanted = {
+  id: number;
+  title: string;
+  artists: string[];
+  album?: string;
+  duration_ms?: number;
+  reason?: string;
+  added_at: string;
+  checked_at?: string;
+};
+
+export type Hit ={ isrc: string; title: string; artists: string[]; duration_ms: number };
 
 export class Unauthorized extends Error {}
 
@@ -66,6 +77,10 @@ export const api = {
   retry: (id: number) => call<Job>("POST", `/jobs/${id}/retry`),
   cancel: (id: number) => call<Job>("POST", `/jobs/${id}/cancel`),
   remove: (id: number) => call<void>("DELETE", `/jobs/${id}`),
+  wanted: () => call<Wanted[]>("GET", "/wanted"),
+  want: (title: string, artist: string) => call<void>("POST", "/wanted", { title, artists: [artist] }),
+  checkWanted: () => call<void>("POST", "/wanted/check"),
+  unwant: (id: number) => call<void>("DELETE", `/wanted/${id}`),
 };
 
 export const active = (j: { status: string }) =>

@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDefaults(t *testing.T) {
@@ -37,6 +38,17 @@ func TestAnEmptySinglesDirIsAllowedViaDash(t *testing.T) {
 	t.Setenv("DREDGE_SINGLES_DIR", "-")
 	if c := Load(); c.SinglesDir != "" {
 		t.Errorf("SinglesDir = %q, want empty (singles straight under the music dir)", c.SinglesDir)
+	}
+}
+
+func TestWantInterval(t *testing.T) {
+	for v, want := range map[string]time.Duration{
+		"": 24 * time.Hour, "6h": 6 * time.Hour, "0": 0, "soon": 24 * time.Hour, "-1h": 24 * time.Hour,
+	} {
+		t.Setenv("DREDGE_WANT_INTERVAL", v)
+		if c := Load(); c.WantEvery != want {
+			t.Errorf("DREDGE_WANT_INTERVAL=%q gave %v, want %v", v, c.WantEvery, want)
+		}
 	}
 }
 

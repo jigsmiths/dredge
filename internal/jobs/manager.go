@@ -42,14 +42,18 @@ type Deps struct {
 	Attempts int
 	Backoff  func(n int) time.Duration
 	Poll     time.Duration // how often to look for queued jobs; 5s if zero
+
+	// how long a wanted track waits between looks; zero looks only when asked
+	WantEvery time.Duration
 }
 
 // Manager owns the queue. Jobs run one at a time, each with Workers tracks in
 // parallel, so two playlists never compete for bandwidth.
 type Manager struct {
 	*Store
-	deps Deps
-	wake chan struct{}
+	deps    Deps
+	wake    chan struct{}
+	recheck chan struct{}
 
 	mu      sync.Mutex
 	current int64
@@ -75,7 +79,31 @@ func (m *Manager) Live(id int64, ts []Track) {
 }
 
 func NewManager(s *Store, d Deps) *Manager {
-	return &Manager{Store: s, deps: d, wake: make(chan struct{}, 1)}
+	return &Manager{Store: s, deps: d, wake: make(chan struct{}, 1), recheck: make(chan struct{}, 1)}
+}
+
+// Want adds a track by name, for one search did not find. Without a length to
+// match on, several versions in the catalogue later leave it ambiguous.
+func (m *Manager) Want(ctx context.Context, title string, artists []string) error {
+	title = strings.TrimSpace(title)
+	var names []string
+	for _, a := range artists {
+		if a = strings.TrimSpace(a); a != "" {
+			names = append(names, a)
+		}
+	}
+	if title == "" || len(names) == 0 {
+		return fmt.Errorf("%w: a title and an artist are needed", ErrInvalid)
+	}
+	return m.AddWanted(ctx, track.Track{Title: title, Artists: names}, "added by name")
+}
+
+// CheckWanted has Run look for every wanted track again, between jobs.
+func (m *Manager) CheckWanted() {
+	select {
+	case m.recheck <- struct{}{}:
+	default:
+	}
 }
 
 // Submit queues a link. created is false when the link is already queued or
@@ -161,6 +189,13 @@ func (m *Manager) Run(ctx context.Context) error {
 	}
 	tick := time.NewTicker(poll)
 	defer tick.Stop()
+	var sweep <-chan time.Time
+	if every := m.deps.WantEvery; every > 0 {
+		t := time.NewTicker(min(every, time.Hour))
+		defer t.Stop()
+		sweep = t.C
+		m.checkWanted(ctx, false)
+	}
 	for {
 		for ctx.Err() == nil {
 			j, err := m.Claim(ctx)
@@ -178,8 +213,69 @@ func (m *Manager) Run(ctx context.Context) error {
 			return nil
 		case <-m.wake:
 		case <-tick.C:
+		case <-sweep:
+			m.checkWanted(ctx, false)
+		case <-m.recheck:
+			m.checkWanted(ctx, true)
 		}
 	}
+}
+
+// checkWanted looks for the wanted tracks that are due, or all with force. A
+// track now in the catalogue is queued as a picked track and leaves the list,
+// as does one the library has gained.
+func (m *Manager) checkWanted(ctx context.Context, force bool) {
+	d := m.deps
+	all, err := m.ListWanted(ctx)
+	if err != nil {
+		slog.Error("listing wanted tracks", "err", err)
+		return
+	}
+	var due []Wanted
+	for _, w := range all {
+		last := w.AddedAt
+		if w.CheckedAt != nil {
+			last = *w.CheckedAt
+		}
+		if force || time.Since(last) >= d.WantEvery {
+			due = append(due, w)
+		}
+	}
+	if len(due) == 0 {
+		return
+	}
+	if _, err := d.Library.Scan(ctx, d.Layout); err != nil {
+		slog.Error("scanning the library for wanted tracks", "err", err)
+		return
+	}
+	tracks := make([]track.Track, len(due))
+	for i, w := range due {
+		tracks[i] = w.Track()
+	}
+	found := 0
+	for i, it := range resolve.Resolve(ctx, tracks, d.Library, d.Search, d.Workers, nil) {
+		if ctx.Err() != nil {
+			return
+		}
+		w := due[i]
+		switch it.Status {
+		case resolve.Need:
+			if _, _, err := m.SubmitTrack(ctx, it.Track.ISRC, it.Track.Title, it.Track.Artists); err != nil {
+				slog.Error("queueing a wanted track", "title", w.Title, "err", err)
+				continue
+			}
+			found++
+			fallthrough
+		case resolve.Have, resolve.Duplicate:
+			err = m.DeleteWanted(ctx, w.ID)
+		default:
+			err = m.CheckedWanted(ctx, w.ID, it.Reason)
+		}
+		if err != nil {
+			slog.Error("updating a wanted track", "title", w.Title, "err", err)
+		}
+	}
+	slog.Info("wanted tracks checked", "checked", len(due), "queued", found)
 }
 
 func (m *Manager) work(root context.Context, j Job) {
@@ -242,6 +338,8 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 		kind  = library.Single
 		list  *spotify.Ref // set for a playlist, which also gets an M3U
 		name  string
+		// tracks it cannot get are wanted; a picked track has no Spotify length to match with
+		fromSpotify bool
 	)
 	if _, picked := strings.CutPrefix(j.URL, pickedPrefix); picked {
 		rows, err := st.Tracks(ctx, j.ID)
@@ -280,6 +378,7 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 				slog.Error("recording a track", "job", j.ID, "pos", it.Pos, "err", err)
 			}
 		})
+		fromSpotify = true
 		kind = library.KindFor(col.Kind == spotify.KindAlbum)
 		if col.Kind == spotify.KindPlaylist {
 			list, name = &ref, col.Name
@@ -324,6 +423,9 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 			set(r.Item.Pos, status, r.Path, r.Bytes, reason)
 		},
 	})
+	if fromSpotify {
+		m.addWanted(ctx, items, results)
+	}
 
 	if list != nil {
 		if paths := download.Placed(items, results); len(paths) > 0 {
@@ -333,6 +435,28 @@ func (m *Manager) process(ctx context.Context, j Job) error {
 		}
 	}
 	return ctx.Err()
+}
+
+// addWanted keeps the tracks the catalogue did not have. Lossy-only tracks are
+// left out: search lists them, so every look would queue the same AAC again.
+func (m *Manager) addWanted(ctx context.Context, items []resolve.Item, results []download.Result) {
+	ctx = context.WithoutCancel(ctx)
+	for i, it := range items {
+		reason := ""
+		switch {
+		case it.Status == resolve.NoMatch:
+			reason = it.Reason
+		case results[i].Outcome == download.NotStocked:
+			reason = "not stocked"
+		default:
+			continue
+		}
+		t := it.Track
+		t.ISRC = ""
+		if err := m.AddWanted(ctx, t, reason); err != nil {
+			slog.Error("recording a wanted track", "title", t.Title, "err", err)
+		}
+	}
 }
 
 // trackStatus is how a download result shows on its track row. A failure that
