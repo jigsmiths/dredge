@@ -36,6 +36,26 @@ func TestPick(t *testing.T) {
 			wantISRC: "USSM10009075",
 		},
 		{
+			name: "a known ISRC picks that recording",
+			want: func() track.Track { t := barracuda; t.ISRC = "USSM17700674"; return t }(),
+			cands: []Candidate{
+				cand("USSM17700674", "Barracuda", "Heart", 208000),
+				cand("USSM10009075", "Barracuda", "Heart", 264000),
+			},
+			outcome:  Matched,
+			wantISRC: "USSM17700674",
+		},
+		{
+			name: "a known ISRC not listed falls back to length",
+			want: func() track.Track { t := barracuda; t.ISRC = "USXXX0000001"; return t }(),
+			cands: []Candidate{
+				cand("USSM17700674", "Barracuda", "Heart", 208000),
+				cand("USSM10009075", "Barracuda", "Heart", 264000),
+			},
+			outcome:  Matched,
+			wantISRC: "USSM10009075",
+		},
+		{
 			name:    "no candidates",
 			want:    barracuda,
 			outcome: NoMatch,

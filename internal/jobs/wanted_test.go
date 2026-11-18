@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jigsmiths/dredge/internal/match"
+	"github.com/jigsmiths/dredge/internal/track"
 )
 
 func (r *rig) wanted() map[string]Wanted {
@@ -156,5 +157,59 @@ func TestOnlyDueWantedTracksAreLookedForOnASchedule(t *testing.T) {
 	r.m.checkWanted(context.Background(), false)
 	if w := r.wanted()["Unknown"]; w.CheckedAt != nil {
 		t.Errorf("a track added just now was looked for: %+v", w)
+	}
+}
+
+type fakeLookup struct {
+	found track.Track
+	ok    bool
+	err   error
+}
+
+func (f fakeLookup) Lookup(_ context.Context, t track.Track) (track.Track, bool, error) {
+	if !f.ok {
+		return t, false, f.err
+	}
+	return f.found, true, nil
+}
+
+func TestATrackWantedByNameIsLookedUpAndItsRecordingQueued(t *testing.T) {
+	r := newRig(t)
+	const isrc = "USAAA2600009"
+	r.m.deps.Lookup = fakeLookup{ok: true, found: track.Track{
+		Title: "Stop The Wedding!", Artists: []string{"Ashe"}, Album: "Stop The Wedding!", DurationMS: 198000, ISRC: isrc,
+	}}
+	// two releases of about the same length; without the ISRC the lower one would be picked
+	r.search.results["Ashe stop the wedding"] = []match.Candidate{
+		cand("USAAA2600001", "Stop the Wedding", "Ashe"), cand(isrc, "Stop the Wedding", "Ashe"),
+	}
+	r.src.stocked[isrc] = true
+	if err := r.m.Want(context.Background(), "stop the wedding", []string{"ashe"}); err != nil {
+		t.Fatal(err)
+	}
+	w := r.wanted()["Stop The Wedding!"]
+	if w.ISRC != isrc || w.DurationMS != 198000 || w.Album != "Stop The Wedding!" {
+		t.Fatalf("wanted = %+v, want the looked-up details", r.wanted())
+	}
+
+	r.start()
+	r.m.CheckWanted()
+	r.waitWanted("emptied", func(ws map[string]Wanted) bool { return len(ws) == 0 })
+	js, err := r.m.List(context.Background(), "")
+	if err != nil || len(js) != 1 || js[0].URL != pickedPrefix+isrc {
+		t.Fatalf("jobs = %+v err=%v, want one picked job for %s", js, err, isrc)
+	}
+}
+
+func TestATrackWantedByNameIsKeptAsTypedWhenTheLookupFails(t *testing.T) {
+	for _, l := range []fakeLookup{{}, {err: errors.New("deezer: HTTP 503")}} {
+		r := newRig(t)
+		r.m.deps.Lookup = l
+		if err := r.m.Want(context.Background(), "stop the wedding", []string{"ashe"}); err != nil {
+			t.Fatal(err)
+		}
+		if w, ok := r.wanted()["stop the wedding"]; !ok || w.ISRC != "" || w.DurationMS != 0 {
+			t.Errorf("lookup %+v: wanted = %+v, want it as typed", l, r.wanted())
+		}
 	}
 }
