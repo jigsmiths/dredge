@@ -1,8 +1,12 @@
 <script lang="ts">
-  import { api, apiKey, Unauthorized, active, ago, clock, isLink, type Hit, type Job } from "./api";
+  import { api, apiKey, Unauthorized, active, ago, clock, isLink, type Hit, type Job, type Wanted } from "./api";
   import JobDetail from "./JobDetail.svelte";
 
   let jobs = $state<Job[]>([]);
+  let wanted = $state<Wanted[]>([]);
+  let checking = $state(false);
+  let wantTitle = $state("");
+  let wantArtist = $state("");
   let link = $state("");
   let error = $state("");
   let needKey = $state(false);
@@ -26,7 +30,7 @@
 
   async function refresh() {
     try {
-      jobs = await api.list();
+      [jobs, wanted] = await Promise.all([api.list(), api.wanted()]);
       needKey = false;
       error = "";
     } catch (e) {
@@ -67,6 +71,9 @@
         hits = await api.search(text);
         searched = text;
         error = "";
+        // "song by artist" splits into the two fields; otherwise the artist is left to fill in
+        const by = text.match(/^(.+?)\s+by\s+(.+)$/i);
+        [wantTitle, wantArtist] = by ? [by[1], by[2]] : [text, ""];
       }
     } catch (e) {
       fail(e);
@@ -83,6 +90,39 @@
       error = "";
       await refresh();
       location.hash = `#/jobs/${j.id}`;
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  async function want(e: SubmitEvent) {
+    e.preventDefault();
+    try {
+      await api.want(wantTitle, wantArtist);
+      hits = null;
+      link = "";
+      error = "";
+      await refresh();
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  async function checkNow() {
+    checking = true;
+    try {
+      await api.checkWanted();
+      setTimeout(() => (checking = false), 5000);
+    } catch (e) {
+      checking = false;
+      fail(e);
+    }
+  }
+
+  async function unwant(w: Wanted) {
+    try {
+      await api.unwant(w.id);
+      await refresh();
     } catch (e) {
       fail(e);
     }
@@ -144,6 +184,12 @@
       {:else}
         <p class="muted">Nothing downloadable found.</p>
       {/each}
+      <p class="muted">Not here? Add it to the wanted list and dredge will keep looking.</p>
+      <form class="row" onsubmit={want}>
+        <input placeholder="Title" bind:value={wantTitle} required />
+        <input placeholder="Artist" bind:value={wantArtist} required />
+        <button>Want this</button>
+      </form>
     {/if}
 
     <h2>Now</h2>
@@ -159,6 +205,23 @@
     {:else}
       <p class="muted">Nothing running.</p>
     {/each}
+
+    {#if wanted.length}
+      <div class="heading">
+        <h2>Wanted</h2>
+        <button class="small" onclick={checkNow} disabled={checking}>{checking ? "Checking" : "Check now"}</button>
+      </div>
+      <p class="muted">Not in the catalogue yet. Looked for again regularly and downloaded when found.</p>
+      {#each wanted as w (w.id)}
+        <div class="hit">
+          <span class="name">{w.title}</span>
+          <span class="muted"
+            >{w.artists.join(", ")}{#if w.checked_at} · checked {ago(w.checked_at)}{/if}</span
+          >
+          <button class="small" onclick={() => unwant(w)}>Remove</button>
+        </div>
+      {/each}
+    {/if}
 
     <h2>History</h2>
     {#each history as j (j.id)}
@@ -243,8 +306,14 @@
   .hit .muted {
     grid-column: auto;
   }
-  .hit button {
+  .hit button,
+  button.small {
     padding: 0.3rem 0.8rem;
+  }
+  .heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
   }
   .job {
     display: grid;
