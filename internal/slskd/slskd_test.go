@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -178,5 +179,25 @@ func TestFetchFindsNothingThatFits(t *testing.T) {
 	noLength.DurationMS = 0
 	if _, err := c.Fetch(context.Background(), noLength, nil); !errors.Is(err, ErrNoFile) {
 		t.Errorf("Fetch without a length = %v, want ErrNoFile without searching", err)
+	}
+}
+
+func TestFetchLogsTheSearchAndTheDownload(t *testing.T) {
+	var buf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	_, c := newFake(t, map[string]string{"alice": "ok"}, []Response{response("alice", true), {Username: "bob"}})
+	if _, err := c.Fetch(context.Background(), wedding, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{
+		`msg="soulseek search finished" query="Ashe stop the wedding" users=2 fitting=1`,
+		`msg="soulseek download finished" user=alice file="Music\\Ashe\\01 Stop The Wedding!.flac"`,
+	} {
+		if !strings.Contains(buf.String(), w) {
+			t.Errorf("logs lack %s:\n%s", w, buf.String())
+		}
 	}
 }

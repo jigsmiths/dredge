@@ -3,8 +3,10 @@ package jobs
 import (
 	"context"
 	"encoding/binary"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -159,5 +161,64 @@ func TestOnlyAWantedTrackWithALengthGoesToSoulseek(t *testing.T) {
 	r.waitWanted("checked", func(ws map[string]Wanted) bool { return ws["stop the wedding"].CheckedAt != nil })
 	if js, _ := r.m.List(context.Background(), ""); len(js) != 0 || s.fetched() != 0 {
 		t.Errorf("jobs = %+v, fetched %d, want nothing without a length", js, s.fetched())
+	}
+}
+
+type logBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *logBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *logBuf) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+func captureLogs(t *testing.T) *logBuf {
+	t.Helper()
+	buf := &logBuf{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return buf
+}
+
+func TestEverySoulseekOutcomeIsLogged(t *testing.T) {
+	cases := []struct {
+		name string
+		s    *fakeSoulseek
+		want []string
+	}{
+		{"filed", &fakeSoulseek{ms: 198000}, []string{
+			`level=INFO msg="soulseek track finished"`, `outcome=done`, `path="Singles/Ashe/Stop The Wedding!.flac"`, `bytes=`,
+		}},
+		{"nothing fits", &fakeSoulseek{err: slskd.ErrNoFile}, []string{
+			`level=INFO msg="soulseek track finished"`, `outcome=no_match`, `reason="no FLAC on Soulseek fits"`,
+		}},
+		{"wrong length", &fakeSoulseek{ms: 240000}, []string{
+			`level=WARN msg="soulseek track finished"`, `outcome=failed`, `err="the file is 4m0s long, wanted 3m18s"`,
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			logs := captureLogs(t)
+			r := soulseekRig(t, c.s)
+			r.start()
+			r.m.CheckWanted()
+			r.onlyJob()
+			got := logs.String()
+			for _, w := range append([]string{`msg="soulseek job queued"`, `msg="soulseek job started"`, `title="Stop The Wedding!"`, `artist=Ashe`}, c.want...) {
+				if !strings.Contains(got, w) {
+					t.Errorf("logs lack %s:\n%s", w, got)
+				}
+			}
+		})
 	}
 }
