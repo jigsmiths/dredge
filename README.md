@@ -29,6 +29,9 @@ Flags: `--music DIR`, `--singles-dir NAME`, `--workers N`, `--attempts N`, `--db
 | `PORT` | `8080` | `serve` listen port |
 | `DREDGE_API_KEY` | unset | when set, `/api` needs it in an `X-Api-Key` header |
 | `DREDGE_WANT_INTERVAL` | `24h` | how often `serve` looks for wanted tracks again; `0` only on request |
+| `DREDGE_SLSKD_URL` | unset | slskd address, to look for wanted tracks on Soulseek |
+| `DREDGE_SLSKD_API_KEY` | unset | slskd API key |
+| `DREDGE_SLSKD_DIR` | unset | slskd's downloads folder, as dredge sees it |
 | `DB_PATH` | per-user config dir | index database (the image sets `/data/dredge.db`) |
 
 ## The library
@@ -66,6 +69,8 @@ Files are written 0644 in 0755 folders. Run as the user that owns the library (u
 Job statuses are `queued`, `resolving`, `running`, `done`, `partial` (finished, but a track failed; retry it), `failed` (the link could not be fetched) and `cancelled`. Track statuses are `pending`, `downloading`, `done`, `have`, `duplicate`, `not_stocked`, `lossy_only` (Monochrome only has it as AAC), `no_match`, `ambiguous` and `failed`. A `done` job can still hold tracks that were not fetched, such as `no_match`; the counts say how many.
 
 Tracks from a Spotify link that end `no_match` or `not_stocked` go on a wanted list, shown on the web page. A song search did not find can be added by title and artist below the results. dredge looks it up in Deezer's public catalogue for its exact title, length and ISRC, and later takes the recording with that ISRC. If Deezer has no single match, it is kept as typed, and stays wanted as `ambiguous` if the catalogue later has several versions. `serve` looks for them again every `DREDGE_WANT_INTERVAL`: one the catalogue now has is queued as a picked track, one the library now has is dropped, and the rest wait for the next look. `lossy_only` tracks are not kept, as search lists them and every look would fetch the same AAC.
+
+With the three `DREDGE_SLSKD_` settings, a wanted track the catalogue still lacks is looked for on Soulseek through [slskd](https://github.com/slskd/slskd), as a job of its own. Only a track with a known length goes: a FLAC qualifies when its length is within 5s, the file name is the title and an artist is in its path, and slskd reports 16 or 24 bit at 44.1kHz or more when it says. Users with a free slot are asked first, up to three. The file is checked for its real length, tagged from the wanted entry and filed as a single; slskd's copy is removed. dredge must be able to read and delete files in `DREDGE_SLSKD_DIR`. Soulseek files carry no ISRC, so a file converted from a lossy one can still pass.
 
 With `DREDGE_API_KEY` set, send `X-Api-Key` on `/api` calls; the web page asks for it once. `/health` and the page itself stay open. Without a key every `/api` route is open, so keep dredge behind your own auth or on a private network. `serve` refuses to start if the music dir does not exist.
 

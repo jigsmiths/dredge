@@ -38,6 +38,7 @@ type Deps struct {
 	Library  Library
 	Details  resolve.Detailer // optional: albums for tracks picked from search
 	Lookup   Lookup           // optional: fills in a song wanted by name
+	Soulseek Soulseek         // optional: where wanted tracks the catalogue lacks are looked for next
 	Layout   library.Layout
 	Workers  int
 	Attempts int
@@ -237,7 +238,8 @@ func (m *Manager) Run(ctx context.Context) error {
 
 // checkWanted looks for the wanted tracks that are due, or all with force. A
 // track now in the catalogue is queued as a picked track and leaves the list,
-// as does one the library has gained.
+// as does one the library has gained. One still missing is looked for on
+// Soulseek, when that is set up.
 func (m *Manager) checkWanted(ctx context.Context, force bool) {
 	d := m.deps
 	all, err := m.ListWanted(ctx)
@@ -282,6 +284,9 @@ func (m *Manager) checkWanted(ctx context.Context, force bool) {
 			fallthrough
 		case resolve.Have, resolve.Duplicate:
 			err = m.DeleteWanted(ctx, w.ID)
+		case resolve.NoMatch, resolve.Ambiguous:
+			m.queueSoulseek(ctx, w)
+			fallthrough
 		default:
 			err = m.CheckedWanted(ctx, w.ID, it.Reason)
 		}
@@ -342,6 +347,9 @@ func (m *Manager) finishedStatus(ctx context.Context, id int64) Status {
 }
 
 func (m *Manager) process(ctx context.Context, j Job) error {
+	if strings.HasPrefix(j.URL, soulseekPrefix) {
+		return m.soulseek(ctx, j)
+	}
 	d, st := m.deps, m.Store
 	if _, err := d.Library.Scan(ctx, d.Layout); err != nil {
 		return fmt.Errorf("scanning the library: %w", err)

@@ -21,6 +21,11 @@ type Config struct {
 	APIKey     string        // DREDGE_API_KEY; when set, /api needs it in X-Api-Key
 	WantEvery  time.Duration // DREDGE_WANT_INTERVAL; how often wanted tracks are looked for again, 0 for never
 
+	// Soulseek through slskd, for wanted tracks the catalogue lacks; off unless all three are set
+	SlskdURL    string // DREDGE_SLSKD_URL
+	SlskdAPIKey string // DREDGE_SLSKD_API_KEY
+	SlskdDir    string // DREDGE_SLSKD_DIR, slskd's downloads folder as dredge sees it
+
 	PyroscopeServerAddress string // PYROSCOPE_SERVER_ADDRESS; profiling is off when empty
 }
 
@@ -34,6 +39,10 @@ func Load() *Config {
 		APIKey:     os.Getenv("DREDGE_API_KEY"),
 		WantEvery:  defaultWantEvery,
 
+		SlskdURL:    os.Getenv("DREDGE_SLSKD_URL"),
+		SlskdAPIKey: os.Getenv("DREDGE_SLSKD_API_KEY"),
+		SlskdDir:    os.Getenv("DREDGE_SLSKD_DIR"),
+
 		PyroscopeServerAddress: os.Getenv("PYROSCOPE_SERVER_ADDRESS"),
 	}
 	if v := os.Getenv("DREDGE_WANT_INTERVAL"); v == "0" {
@@ -46,6 +55,17 @@ func Load() *Config {
 		c.Workers = n
 	}
 	return c
+}
+
+// Soulseek reports whether slskd is fully set up, and whether any of it is.
+func (c *Config) Soulseek() (on, partly bool) {
+	set := 0
+	for _, v := range []string{c.SlskdURL, c.SlskdAPIKey, c.SlskdDir} {
+		if v != "" {
+			set++
+		}
+	}
+	return set == 3, set > 0 && set < 3
 }
 
 // SinglesDir reads the "-" given for no singles folder as empty.

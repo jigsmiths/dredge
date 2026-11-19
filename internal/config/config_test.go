@@ -60,3 +60,22 @@ func TestBadWorkerCountsFallBack(t *testing.T) {
 		}
 	}
 }
+
+func TestSoulseekNeedsAllThreeSettings(t *testing.T) {
+	for _, c := range []struct {
+		url, key, dir string
+		on, partly    bool
+	}{
+		{"", "", "", false, false},
+		{"http://localhost:5030", "k", "/downloads/slskd", true, false},
+		{"http://localhost:5030", "", "/downloads/slskd", false, true},
+		{"", "k", "", false, true},
+	} {
+		t.Setenv("DREDGE_SLSKD_URL", c.url)
+		t.Setenv("DREDGE_SLSKD_API_KEY", c.key)
+		t.Setenv("DREDGE_SLSKD_DIR", c.dir)
+		if on, partly := Load().Soulseek(); on != c.on || partly != c.partly {
+			t.Errorf("%+v: Soulseek() = %v, %v", c, on, partly)
+		}
+	}
+}
