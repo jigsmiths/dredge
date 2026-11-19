@@ -74,11 +74,13 @@ func (c *Client) Fetch(ctx context.Context, t track.Track, progress func(done, t
 	if len(t.Artists) == 0 || t.DurationMS <= 0 {
 		return "", ErrNoFile
 	}
-	resps, err := c.search(ctx, queryFor(t))
+	q := queryFor(t)
+	resps, err := c.search(ctx, q)
 	if err != nil {
 		return "", err
 	}
 	choices := Pick(t, resps)
+	slog.Info("soulseek search finished", "query", q, "users", len(resps), "fitting", len(choices))
 	if len(choices) == 0 {
 		return "", ErrNoFile
 	}
@@ -86,6 +88,7 @@ func (c *Client) Fetch(ctx context.Context, t track.Track, progress func(done, t
 	for _, ch := range choices[:min(len(choices), tries)] {
 		path, err := c.download(ctx, ch, progress)
 		if err == nil {
+			slog.Info("soulseek download finished", "user", ch.Username, "file", ch.File.Filename, "bytes", ch.File.Size)
 			return path, nil
 		}
 		if ctx.Err() != nil {

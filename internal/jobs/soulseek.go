@@ -42,6 +42,7 @@ func (m *Manager) queueSoulseek(ctx context.Context, w Wanted) {
 		return
 	}
 	if created {
+		slog.Info("soulseek job queued", "title", w.Title, "artist", w.Artists[0])
 		m.poke()
 	}
 }
@@ -67,9 +68,32 @@ func (m *Manager) soulseek(ctx context.Context, j Job) error {
 	if err := st.SetStatus(ctx, j.ID, Running, ""); err != nil {
 		return err
 	}
+	started := time.Now()
+	slog.Info("soulseek job started", "job", j.ID, "title", w.Title, "artist", w.Artists[0])
+	// set records the track's status; a final one is also logged, at Warn when it failed
 	set := func(status TrackStatus, path string, bytes int64, reason string) {
 		if path != "" {
 			path = d.Layout.Rel(path)
+		}
+		if status != TrackDownloading {
+			outcome := string(status)
+			if status == TrackPending {
+				outcome = "stopped"
+			}
+			args := []any{"job", j.ID, "title", w.Title, "artist", w.Artists[0], "outcome", outcome,
+				"took", time.Since(started).Round(time.Millisecond)}
+			level := slog.LevelInfo
+			switch status {
+			case TrackDone, TrackHave:
+				args = append(args, "path", path, "bytes", bytes)
+			case TrackPending:
+			case TrackFailed:
+				level = slog.LevelWarn
+				args = append(args, "err", reason)
+			default:
+				args = append(args, "reason", reason)
+			}
+			slog.Log(context.Background(), level, "soulseek track finished", args...)
 		}
 		if err := st.SetTrack(context.WithoutCancel(ctx), j.ID, 0, status, path, bytes, reason); err != nil {
 			slog.Error("recording a track", "job", j.ID, "err", err)
