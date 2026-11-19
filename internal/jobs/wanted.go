@@ -92,3 +92,17 @@ func (s *Store) CheckedWanted(ctx context.Context, id int64, reason string) erro
 	_, err := s.db.ExecContext(ctx, `UPDATE wanted SET checked_at = ?, reason = ? WHERE id = ?`, unix(time.Now()), reason, id)
 	return err
 }
+
+// GetWanted returns one wanted track. The list stays short, so it is read whole.
+func (s *Store) GetWanted(ctx context.Context, id int64) (Wanted, error) {
+	ws, err := s.ListWanted(ctx)
+	if err != nil {
+		return Wanted{}, err
+	}
+	for _, w := range ws {
+		if w.ID == id {
+			return w, nil
+		}
+	}
+	return Wanted{}, ErrWantedNotFound
+}

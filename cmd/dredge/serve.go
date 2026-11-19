@@ -12,6 +12,7 @@ import (
 	"github.com/jigsmiths/dredge/internal/jobs"
 	"github.com/jigsmiths/dredge/internal/library"
 	"github.com/jigsmiths/dredge/internal/server"
+	"github.com/jigsmiths/dredge/internal/slskd"
 )
 
 // startProfiling sends profiles to a Pyroscope server, if there is one, and
@@ -53,11 +54,19 @@ func serve(ctx context.Context, e *env) error {
 	defer d.close()
 
 	layout := library.Layout{Root: cfg.MusicDir, SinglesDir: cfg.SinglesDir}
-	mgr := jobs.NewManager(jobs.NewStore(d.conn), jobs.Deps{
+	deps := jobs.Deps{
 		Spotify: d.spotify, Search: d.search, Source: d.source, Library: d.index, Details: d.details,
 		Lookup: deezer.New("", nil),
 		Layout: layout, Workers: cfg.Workers, WantEvery: cfg.WantEvery,
-	})
+	}
+	switch on, partly := cfg.Soulseek(); {
+	case on:
+		deps.Soulseek = slskd.New(cfg.SlskdURL, cfg.SlskdAPIKey, cfg.SlskdDir, nil)
+		slog.Info("wanted tracks are also looked for on Soulseek", "slskd", cfg.SlskdURL)
+	case partly:
+		slog.Warn("Soulseek is off: set DREDGE_SLSKD_URL, DREDGE_SLSKD_API_KEY and DREDGE_SLSKD_DIR together")
+	}
+	mgr := jobs.NewManager(jobs.NewStore(d.conn), deps)
 	runCtx, stopJobs := context.WithCancel(ctx)
 	jobsDone := make(chan struct{})
 	go func() {
