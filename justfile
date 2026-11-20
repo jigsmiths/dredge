@@ -88,7 +88,7 @@ clean:
     @echo "Clean complete"
 
 # Show current version and what the next version would be based on conventional commits
-# Requires: go install github.com/caarlos0/svu/v3@latest
+# Requires: go install github.com/caarlos0/svu/v3@v3.4.4
 version:
     @echo "Current: $(svu current)"
     @echo "Next:    $(svu next --v0)"
